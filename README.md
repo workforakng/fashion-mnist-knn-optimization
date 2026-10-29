@@ -84,20 +84,25 @@ To resolve these bottlenecks while strictly preserving the instance-based metric
 
 The architectural methodology follows a structured progression, mapped visually in the end-to-end framework flowchart below.
 
-### 2.1 System Architecture Flowchart
-
----
-
 ### 2.1 Mathematical Formulations
 
 #### A. Metric Distance Formulations in Classical Space
 For two sample vectors $u, v \in \mathbb{R}^D$, we systematically analyze three metric geometries:
-* **Euclidean ($L_2$) Metric:**
-  $$d_{L_2}(u, v) = \|u - v\|_2 = \sqrt{\sum_{j=1}^D (u_j - v_j)^2}$$
-* **Manhattan ($L_1$) Metric:**
-  $$d_{L_1}(u, v) = \|u - v\|_1 = \sum_{j=1}^D |u_j - v_j|$$
-* **Cosine Angular Metric:**
-  $$d_{\text{Cos}}(u, v) = 1 - \frac{u \cdot v}{\|u\|_2 \|v\|_2} = 1 - \frac{\sum_{j=1}^D u_j v_j}{\sqrt{\sum_{j=1}^D u_j^2} \sqrt{\sum_{j=1}^D v_j^2}}$$
+
+**1. Euclidean ($L_2$) Distance:**
+$$
+d_{L_2}(u, v) = \|u - v\|_2 = \sqrt{\sum_{j=1}^D (u_j - v_j)^2}
+$$
+
+**2. Manhattan ($L_1$) Distance:**
+$$
+d_{L_1}(u, v) = \|u - v\|_1 = \sum_{j=1}^D |u_j - v_j|
+$$
+
+**3. Cosine Angular Distance:**
+$$
+d_{\text{Cos}}(u, v) = 1 - \frac{u \cdot v}{\|u\|_2 \|v\|_2} = 1 - \frac{\sum_{j=1}^D u_j v_j}{\sqrt{\sum_{j=1}^D u_j^2} \sqrt{\sum_{j=1}^D v_j^2}}
+$$
 
 #### B. Principal Component Analysis (Spectral Projection)
 Let $X \in \mathbb{R}^{N \times D}$ denote the zero-centered data matrix. The sample covariance matrix $\Sigma \in \mathbb{R}^{D \times D}$ is defined as:
@@ -152,29 +157,40 @@ Experiments are evaluated on Zalando's Fashion-MNIST benchmark:
 Training a continuous metric space requires optimization functions that can stably update both the feature extractor parameters $\theta$ and the geometric class prototype centroids $\mathcal{P} = \{p_1, \dots, p_C\}$. Because the Soft-KNN loss landscape combines non-linear convolutional mappings with pairwise Euclidean distance manifolds, we systematically evaluated three optimization algorithms:
 
 #### 1. AdamW (Decoupled Weight Decay Regularization) — Selected Champion
-* **Mathematical Formulation:**
-  $$\begin{aligned}
+
+**Parameter Update Equations:**
+$$
+\begin{aligned}
 m_t &= \beta_1 m_{t-1} + (1 - \beta_1) g_t \\
 v_t &= \beta_2 v_{t-1} + (1 - \beta_2) g_t^2 \\
-\hat{m}_t &= m_t / (1 - \beta_1^t) \\
-\hat{v}_t &= v_t / (1 - \beta_2^t) \\
+\hat{m}_t &= \frac{m_t}{1 - \beta_1^t}, \quad \hat{v}_t = \frac{v_t}{1 - \beta_2^t} \\
 \theta_t &= \theta_{t-1} - \eta_t \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1} \right)
-\end{aligned}$$
-* **Role in This Project:** Used as the primary optimizer with hyperparameters $\beta_1 = 0.9, \beta_2 = 0.999, \eta_0 = 10^{-3}$, and $\lambda = 10^{-4}$ coupled with a Cosine Annealing learning rate schedule.
+\end{aligned}
+$$
+
+* **Role in This Project:** Used as the primary optimizer with hyperparameters $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\eta_0 = 10^{-3}$, and $\lambda = 10^{-4}$ coupled with a Cosine Annealing learning rate schedule.
 * **Benefits & Empirical Advantage:**
   * **Decoupled Weight Decay:** Standard L2 regularization in adaptive methods couples weight decay with gradient magnitudes, causing frequently updated weights to receive less shrinkage. AdamW decouples weight decay directly into the parameter update step, providing true Euclidean norm regularization that prevents embedding drift.
   * **Adaptive Coordinate Scaling:** Individual dimensions of the latent 64-D embedding space learn at different rates. AdamW normalizes step sizes across all coordinates, preventing dominant gradient directions from destabilizing class prototype coordinates.
   * **Empirical Convergence:** AdamW minimized cross-entropy loss from 1.82 to 0.24 smoothly without oscillations (Figure 5).
 
 #### 2. Stochastic Gradient Descent with Nesterov Momentum (SGD-M)
-* **Mathematical Formulation:**
-  $$v_t = \gamma v_{t-1} + \eta_t \nabla_\theta \mathcal{L}(\theta_{t-1} + \gamma v_{t-1}), \quad \theta_t = \theta_{t-1} - v_t$$
+
+**Parameter Update Equations:**
+$$
+v_t = \gamma v_{t-1} + \eta_t \nabla_\theta \mathcal{L}(\theta_{t-1} + \gamma v_{t-1}), \quad \theta_t = \theta_{t-1} - v_t
+$$
+
 * **Evaluation in This Project:** Evaluated with learning rate $\eta = 0.01$ and momentum $\gamma = 0.9$.
 * **Trade-off Analysis:** While SGD-M provides strong asymptotic generalization in overparameterized networks, its fixed scalar learning rate across all parameters struggled on the hybrid loss landscape of Soft-KNN. The prototype anchor coordinates updated too slowly relative to the convolutional feature maps, requiring 3x more training epochs to reach equivalent validation accuracy.
 
 #### 3. Root Mean Square Propagation (RMSprop)
-* **Mathematical Formulation:**
-  $$v_t = \alpha v_{t-1} + (1 - \alpha) g_t^2, \quad \theta_t = \theta_{t-1} - \frac{\eta}{\sqrt{v_t} + \epsilon} g_t$$
+
+**Parameter Update Equations:**
+$$
+v_t = \alpha v_{t-1} + (1 - \alpha) g_t^2, \quad \theta_t = \theta_{t-1} - \frac{\eta}{\sqrt{v_t} + \epsilon} g_t
+$$
+
 * **Trade-off Analysis:** Evaluated with $\alpha = 0.99, \eta = 10^{-3}$. RMSprop tracks second-order raw moments without first-order momentum smoothing. In our experiments, this caused observable gradient thrashing and validation accuracy jitter near the acute minima of sharp temperature regimes ($\tau = 0.1$).
 
 ---
