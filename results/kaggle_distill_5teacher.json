@@ -1,0 +1,9 @@
+{
+  "val_acc": 0.9008333333333334,
+  "test_acc": 0.8901,
+  "k": 7,
+  "tau": 0.1,
+  "teacher_models": 5,
+  "epochs_run": 33,
+  "best_train_val": 0.901
+}
