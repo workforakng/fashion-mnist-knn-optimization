@@ -45,35 +45,7 @@ flowchart TD
     end
 ```
 
-```text
-+----------------------------------------------------------------------------------------------------+
-|                                    1. DATA INGESTION & SPLITTING                                   |
-|   Fashion-MNIST (70,000 Grayscale 28x28 Images) --> Min-Max Scaling [0, 1]                        |
-|   Partition: 50,000 Training Samples | 10,000 Validation Samples | 10,000 Testing Samples          |
-+----------------------------------------------------------------------------------------------------+
-                                                  |
-                         +------------------------+-------------------------+
-                         |                                                  |
-                         v                                                  v
-+--------------------------------------------------+ +-----------------------------------------------+
-|         2. CLASSICAL BASELINE & PCA              | |          3. NOVELTY: SOFT-KNN METRIC          |
-|  - Raw 784-D Euclidean Baseline (k=5): 85.24%     | |  - ConvNet Backbone: Preserves 2D Topology    |
-|  - PCA Projection (784-D -> 64-D, 85.3% Var)     | |  - Data Augmentation: Crop + Horizontal Flip  |
-|  - Optimized PCA-KNN (k=7, Cosine): 86.43%       | |  - Temperature-scaled Softmax Distance Anchor |
-|  - Latency: 7.14x Faster Evaluation              | |  - Differentiable Prototype Head: 87.63% Acc  |
-+--------------------------------------------------+ +-----------------------------------------------+
-                         |                                                  |
-                         +------------------------+-------------------------+
-                                                  |
-                                                  v
-+----------------------------------------------------------------------------------------------------+
-|                                4. DISTILLATION & CONVEX FUSION                                     |
-|  - Multi-Seed Variance Reduction (Seeds 42, 7, 123): 88.06%                                        |
-|  - Multi-Teacher Knowledge Distillation (Student Head): 89.03%                                     |
-|  - 7-Source Convex Ensemble Fusion (Experiment E25):                                               |
-|    >>> VALIDATION ACCURACY: 90.85%  |  UNBIASED TEST ACCURACY: 89.51% <<<                          |
-+----------------------------------------------------------------------------------------------------+
-```
+---
 
 ---
 
@@ -81,7 +53,7 @@ flowchart TD
 
 ### 1.1 Background and Motivation
 The K-Nearest Neighbors (KNN) classification algorithm represents one of the foundational non-parametric paradigms in statistical pattern recognition. Given an annotated training dataset:
-$$\mathcal{D}_{\text{train}} = \{(x_i, y_i)\}_{i=1}^{N}, \quad x_i \in \mathbb{R}^D, \quad y_i \in \{1, 2, \dots, C\}$$
+$$\mathcal{D}_{\text{train}} = \{ (x_i, y_i) \}_{i=1}^{N}, \quad x_i \in \mathbb{R}^D, \quad y_i \in \{ 1, 2, \dots, C \}$$
 
 the canonical KNN decision rule assigns an unobserved query instance $x_q \in \mathbb{R}^D$ to the majority class among its $K$ nearest neighbors under a metric distance function $d(x_q, x_i)$:
 
@@ -114,48 +86,18 @@ The architectural methodology follows a structured progression, mapped visually 
 
 ### 2.1 System Architecture Flowchart
 
-```text
-+----------------------------------------------------------------------------------------------------+
-|                                    1. DATA INGESTION & SPLITTING                                   |
-|   Fashion-MNIST (70,000 Grayscale 28x28 Images) --> Min-Max Scaling [0, 1]                        |
-|   Partition: 50,000 Training Samples | 10,000 Validation Samples | 10,000 Testing Samples          |
-+----------------------------------------------------------------------------------------------------+
-                                                  |
-                         +------------------------+-------------------------+
-                         |                                                  |
-                         v                                                  v
-+--------------------------------------------------+ +-----------------------------------------------+
-|         2. CLASSICAL BASELINE & PCA              | |          3. NOVELTY: SOFT-KNN METRIC          |
-|  - Raw 784-D Euclidean Baseline (k=5): 85.24%     | |  - ConvNet Backbone: Preserves 2D Topology    |
-|  - PCA Projection (784-D -> 64-D, 85.3% Var)     | |  - Data Augmentation: Crop + Horizontal Flip  |
-|  - Optimized PCA-KNN (k=7, Cosine): 86.43%       | |  - Temperature-scaled Softmax Distance Anchor |
-|  - Latency: 7.14x Faster Evaluation              | |  - Differentiable Prototype Head: 87.63% Acc  |
-+--------------------------------------------------+ +-----------------------------------------------+
-                         |                                                  |
-                         +------------------------+-------------------------+
-                                                  |
-                                                  v
-+----------------------------------------------------------------------------------------------------+
-|                                4. DISTILLATION & CONVEX FUSION                                     |
-|  - Multi-Seed Variance Reduction (Seeds 42, 7, 123): 88.06%                                        |
-|  - Multi-Teacher Knowledge Distillation (Student Head): 89.03%                                     |
-|  - 7-Source Convex Ensemble Fusion (Experiment E25):                                               |
-|    >>> VALIDATION ACCURACY: 90.85%  |  UNBIASED TEST ACCURACY: 89.51% <<<                          |
-+----------------------------------------------------------------------------------------------------+
-```
-
 ---
 
-### 2.2 Mathematical Formulations
+### 2.1 Mathematical Formulations
 
 #### A. Metric Distance Formulations in Classical Space
 For two sample vectors $u, v \in \mathbb{R}^D$, we systematically analyze three metric geometries:
 * **Euclidean ($L_2$) Metric:**
-  $$d_{L_2}(u, v) = \|u - v\|_2 = \sqrt{\sum_{j=1}^{D} (u_j - v_j)^2}$$
+  $$d_{L_2}(u, v) = \|u - v\|_2 = \sqrt{\sum_{j=1}^D (u_j - v_j)^2}$$
 * **Manhattan ($L_1$) Metric:**
-  $$d_{L_1}(u, v) = \|u - v\|_1 = \sum_{j=1}^{D} |u_j - v_j|$$
+  $$d_{L_1}(u, v) = \|u - v\|_1 = \sum_{j=1}^D |u_j - v_j|$$
 * **Cosine Angular Metric:**
-  $$d_{\text{Cos}}(u, v) = 1 - \frac{\langle u, v \rangle}{\|u\|_2 \|v\|_2} = 1 - \frac{\sum_{j=1}^{D} u_j v_j}{\sqrt{\sum_{j=1}^{D} u_j^2} \sqrt{\sum_{j=1}^{D} v_j^2}}$$
+  $$d_{\text{Cos}}(u, v) = 1 - \frac{u \cdot v}{\|u\|_2 \|v\|_2} = 1 - \frac{\sum_{j=1}^D u_j v_j}{\sqrt{\sum_{j=1}^D u_j^2} \sqrt{\sum_{j=1}^D v_j^2}}$$
 
 #### B. Principal Component Analysis (Spectral Projection)
 Let $X \in \mathbb{R}^{N \times D}$ denote the zero-centered data matrix. The sample covariance matrix $\Sigma \in \mathbb{R}^{D \times D}$ is defined as:
@@ -181,12 +123,12 @@ where $\tau \in (0, \infty)$ acts as a thermodynamic temperature parameter:
 The parameters $\theta$ and prototype vectors $\mathcal{P}$ are trained simultaneously by minimizing the empirical regularized cross-entropy loss over mini-batches $\mathcal{B}$:
 $$\mathcal{L}_{\text{Soft-KNN}}(\theta, \mathcal{P}) = -\frac{1}{|\mathcal{B}|} \sum_{i \in \mathcal{B}} \log P(y = y_i \mid x_i; \theta, \mathcal{P}, \tau) + \frac{\lambda}{2} \|\theta\|_2^2$$
 Gradients with respect to embedding $z_i = f_\theta(x_i)$ take the analytical form:
-$$\frac{\partial \mathcal{L}_i}{\partial z_i} = \frac{1}{\tau} \sum_{c=1}^{C} \left( P(y = c \mid x_i) - \mathbb{I}(y_i = c) \right) \frac{z_i - p_c}{\|z_i - p_c\|_2}$$
+$$\frac{\partial \mathcal{L}_i}{\partial z_i} = \frac{1}{\tau} \sum_{c=1}^{C} (P(y = c \mid x_i) - \mathbb{I}(y_i = c)) \frac{z_i - p_c}{\|z_i - p_c\|_2}$$
 This gradient formulation exerts an attractive force pulling the embedding $z_i$ toward the ground-truth prototype $p_{y_i}$ while exerting repulsive forces that push $z_i$ away from non-target prototypes $p_{c \ne y_i}$, proportional to their misclassified posterior mass.
 
 #### D. Multi-Teacher Knowledge Distillation
 To compress dark knowledge from diverse models into the student metric head, we formulate the composite objective:
-$$\mathcal{L}_{\text{Distill}} = (1 - \alpha) \mathcal{L}_{\text{CE}}(P_S, y) + \alpha T^2 \mathcal{D}_{\text{KL}}\left( \sigma\left(\frac{z_T}{T}\right) \,\|\, \sigma\left(\frac{z_S}{T}\right) \right)$$
+$$\mathcal{L}_{\text{Distill}} = (1 - \alpha) \mathcal{L}_{\text{CE}}(P_S, y) + \alpha T^2 D_{\text{KL}}\left( \sigma(z_T / T) \parallel \sigma(z_S / T) \right)$$
 where $T$ represents distillation temperature, $\alpha \in [0, 1]$ balances ground-truth vs. soft supervision, and $\mathcal{D}_{\text{KL}}$ is the Kullback-Leibler divergence.
 
 #### E. Convex Multi-Source Ensemble Fusion
@@ -212,11 +154,12 @@ Training a continuous metric space requires optimization functions that can stab
 #### 1. AdamW (Decoupled Weight Decay Regularization) — Selected Champion
 * **Mathematical Formulation:**
   $$\begin{aligned}
-  m_t &= \beta_1 m_{t-1} + (1 - \beta_1) g_t \\
-  v_t &= \beta_2 v_{t-1} + (1 - \beta_2) g_t^2 \\
-  \hat{m}_t &= \frac{m_t}{1 - \beta_1^t}, \quad \hat{v}_t = \frac{v_t}{1 - \beta_2^t} \\
-  \theta_t &= \theta_{t-1} - \eta_t \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1} \right)
-  \end{aligned}$$
+m_t &= \beta_1 m_{t-1} + (1 - \beta_1) g_t \\
+v_t &= \beta_2 v_{t-1} + (1 - \beta_2) g_t^2 \\
+\hat{m}_t &= m_t / (1 - \beta_1^t) \\
+\hat{v}_t &= v_t / (1 - \beta_2^t) \\
+\theta_t &= \theta_{t-1} - \eta_t \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1} \right)
+\end{aligned}$$
 * **Role in This Project:** Used as the primary optimizer with hyperparameters $\beta_1 = 0.9, \beta_2 = 0.999, \eta_0 = 10^{-3}$, and $\lambda = 10^{-4}$ coupled with a Cosine Annealing learning rate schedule.
 * **Benefits & Empirical Advantage:**
   * **Decoupled Weight Decay:** Standard L2 regularization in adaptive methods couples weight decay with gradient magnitudes, causing frequently updated weights to receive less shrinkage. AdamW decouples weight decay directly into the parameter update step, providing true Euclidean norm regularization that prevents embedding drift.
