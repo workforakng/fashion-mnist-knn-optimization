@@ -1,5 +1,11 @@
 # Systematic Optimization and Metric Learning for K-Nearest Neighbors Classification on Fashion-MNIST
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/workforakng/fashion-mnist-knn-optimization/blob/main/fashion_knn_colab.ipynb)
+[![Kaggle Kernel](https://img.shields.io/badge/Kaggle-Notebook-20BEFF?logo=kaggle&logoColor=white)](https://www.kaggle.com/code/aksharnathgorain/fashion-knn-clean-pipeline)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org)
+[![Accuracy](https://img.shields.io/badge/Test%20Accuracy-91.06%25-brightgreen.svg)](#4-empirical-evaluation-and-benchmark-results)
+
 **Authors:** Akshar Nath Gorain et al.  
 **Affiliation:** Department of Computer Science & Machine Learning Research Group  
 **Target Venue:** Machine Learning & Pattern Recognition Coursework  
@@ -298,6 +304,10 @@ Canonical KNN requires computing pairwise distances to all 50,000 training point
 ## 7. Standalone Colab/Kaggle Reproduction Instructions
 
 The full experimental pipeline can be reproduced cell-by-cell without local dependencies via the standalone Jupyter notebook located at [`fashion_knn_clean_pipeline.ipynb`](fashion_knn_clean_pipeline.ipynb).
+
+### 7.1 Running via Google Colab / Kaggle
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/workforakng/fashion-mnist-knn-optimization/blob/main/fashion_knn_colab.ipynb)
 
 ### 7.1 Running via Google Colab / Kaggle
 1. Upload [`fashion_knn_clean_pipeline.ipynb`](fashion_knn_clean_pipeline.ipynb) to Google Colab or Kaggle Notebooks.
