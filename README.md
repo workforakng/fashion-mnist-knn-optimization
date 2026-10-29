@@ -10,9 +10,9 @@
 
 ## Abstract
 
-Non-parametric instance-based classifiers, notably the K-Nearest Neighbors (KK$-NN) algorithm, possess asymptotic Bayes-optimal error bounds under infinite sample regimes. However, when deployed on high-dimensional vision benchmarks such as Fashion-MNIST ($D = 784$), classical KK$-NN exhibits degraded classification fidelity (~85.24% top-1 accuracy) and prohibitive $\mathcal{O}(N \cdot D)$ inference latency. This degradation stems from the phenomenon of distance concentration in metric spaces of high intrinsic dimension—commonly known as the *curse of dimensionality*—as well as the rigid assumption of spatial isometry across raw pixel vectors. In this investigation, we formulate a principled optimization hierarchy that systematically addresses the theoretical limitations of instance-based classification. First, we characterize the variance spectrum via Principal Component Analysis (PCA), demonstrating that projectively compressing the input manifold to $d=64$ preserves over 85.3% of the total spectral variance, suppresses high-frequency sensor noise, enhances test accuracy to 86.43%, and delivers a 7.14× query latency acceleration. Second, we introduce **Soft-KNN**, a differentiable metric learning framework that replaces the non-differentiable discrete majority voting operator with a continuous, temperature-scaled ($\tau$) Boltzmann assignment over pairwise Euclidean distances computed against learnable class prototypes. Third, we establish a topology-preserving 2D convolutional embedding backbone paired with regularized spatial stochastic augmentations, expanding the feature representation beyond rigid translation boundaries. Fourth, we deploy multi-teacher knowledge distillation to guide the metric geometry of the student representation space. Finally, through an empirical convex ensemble fusion across seven diversified metric heads, our proposed architecture achieves **89.51% test accuracy** and **90.85% validation accuracy** on the full 10,000-sample Fashion-MNIST test benchmark. We provide exhaustive empirical evidence, diagnostic loss and bias-variance learning curves, hyperparameter sensitivity sweeps, ablation studies, and an error matrix analysis illustrating class boundary confusions.
+Non-parametric instance-based classifiers, notably the K-Nearest Neighbors (KNN) algorithm, possess asymptotic Bayes-optimal error bounds under infinite sample regimes. However, when deployed on high-dimensional vision benchmarks such as Fashion-MNIST ($D = 784$), classical KNN exhibits degraded classification fidelity (~85.24% top-1 accuracy) and prohibitive $\mathcal{O}(N \cdot D)$ inference latency. This degradation stems from the phenomenon of distance concentration in metric spaces of high intrinsic dimension—commonly known as the *curse of dimensionality*—as well as the rigid assumption of spatial isometry across raw pixel vectors. In this investigation, we formulate a principled optimization hierarchy that systematically addresses the theoretical limitations of instance-based classification. First, we characterize the variance spectrum via Principal Component Analysis (PCA), demonstrating that projectively compressing the input manifold to $d=64$ preserves over 85.3% of the total spectral variance, suppresses high-frequency sensor noise, enhances test accuracy to 86.43%, and delivers a 7.14× query latency acceleration. Second, we introduce **Soft-KNN**, a differentiable metric learning framework that replaces the non-differentiable discrete majority voting operator with a continuous, temperature-scaled ($\tau$) Boltzmann assignment over pairwise Euclidean distances computed against learnable class prototypes. Third, we establish a topology-preserving 2D convolutional embedding backbone paired with regularized spatial stochastic augmentations, expanding the feature representation beyond rigid translation boundaries. Fourth, we deploy multi-teacher knowledge distillation to guide the metric geometry of the student representation space. Finally, through an empirical convex ensemble fusion across seven diversified metric heads, our proposed architecture achieves **89.51% test accuracy** and **90.85% validation accuracy** on the full 10,000-sample Fashion-MNIST test benchmark. We provide exhaustive empirical evidence, diagnostic loss and bias-variance learning curves, hyperparameter sensitivity sweeps, ablation studies, and an error matrix analysis illustrating class boundary confusions.
 
-**Keywords: ** K-Nearest Neighbors (KK$-NN), Differentiable Metric Learning, Soft-KNN, Fashion-MNIST, Dimensionality Reduction, Principal Component Analysis, Knowledge Distillation, Ensemble Fusion.
+**Keywords: ** K-Nearest Neighbors (KNN), Differentiable Metric Learning, Soft-KNN, Fashion-MNIST, Dimensionality Reduction, Principal Component Analysis, Knowledge Distillation, Ensemble Fusion.
 
 ---
 
@@ -80,7 +80,7 @@ flowchart TD
 ## 1. Introduction and Problem Formulation
 
 ### 1.1 Background and Motivation
-The K-Nearest Neighbors (KK$-NN) classification algorithm represents one of the foundational non-parametric paradigms in statistical pattern recognition. Given an annotated training dataset $\mathcal{D}_{\text{train}} = \{(x_i, y_i)\}_{i=1}^{N}$ with feature vectors $x_i \in \mathcal{X} \subseteq \mathbb{R}^D$ and categorical labels $y_i \in \mathcal{Y} = \{1, 2, \dots, C\}$, the canonical KK$-NN rule assigns an unobserved query instance $x^* \in \mathcal{X}$ to the majority class among its $K closest neighbors defined under a metric distance function $d: \mathcal{X} \times \mathcal{X} \to \mathbb{R}_{\ge 0}$:
+The K-Nearest Neighbors (KNN) classification algorithm represents one of the foundational non-parametric paradigms in statistical pattern recognition. Given an annotated training dataset $\mathcal{D}_{\text{train}} = \{(x_i, y_i)\}_{i=1}^{N}$ with feature vectors $x_i \in \mathcal{X} \subseteq \mathbb{R}^D$ and categorical labels $y_i \in \mathcal{Y} = \{1, 2, \dots, C\}$, the canonical KNN rule assigns an unobserved query instance $x^* \in \mathcal{X}$ to the majority class among its K closest neighbors defined under a metric distance function $d: \mathcal{X} \times \mathcal{X} \to \mathbb{R}_{\ge 0}$:
 
 $$\hat{y}(x^*) = \arg\max_{c \in \mathcal{Y}} \sum_{i \in \mathcal{N}_K(x^*)} \mathbb{I}(y_i = c)$$
 
@@ -88,7 +88,7 @@ where $\mathcal{N}_K(x^*)$ designates the index set of the $K$ smallest distance
 
 $$R^* \le R \le R^* \left( 2 - \frac{C}{C-1} R^* \right)$$
 
-Despite these theoretical guarantees, canonical KK$-NN displays severe degradation when applied directly to raw rasterized image arrays, such as the Zalando Fashion-MNIST benchmark ($N_{\text{train}} = 60,000$, $N_{\text{test}} = 10,000$, $C = 10$, $D = 28 \times 28 = 784$). This drop in efficacy arises from three structural impediments:
+Despite these theoretical guarantees, canonical KNN displays severe degradation when applied directly to raw rasterized image arrays, such as the Zalando Fashion-MNIST benchmark ($N_{\text{train}} = 60,000$, $N_{\text{test}} = 10,000$, $C = 10$, $D = 28 \times 28 = 784$). This drop in efficacy arises from three structural impediments:
 1. **Curse of Dimensionality and Metric Concentration:** As ambient dimension $D$ grows, the relative difference between the distance to the nearest neighbor and the distance to the furthest neighbor vanishes uniformly:
    $$\lim_{D \to \infty} \mathbb{P}\left( \frac{\max_{i} \|x^* - x_i\|_2 - \min_{i} \|x^* - x_i\|_2}{\min_{i} \|x^* - x_i\|_2} \le \epsilon \right) = 1, \quad \forall \epsilon > 0$$
    Consequently, neighborhood boundaries lose discriminative selectivity.
@@ -202,7 +202,44 @@ Experiments are evaluated on Zalando's Fashion-MNIST benchmark:
 * **Categories ($C=10$):** 0: T-shirt/top, 1: Trouser, 2: Pullover, 3: Dress, 4: Coat, 5: Sandal, 6: Shirt, 7: Sneaker, 8: Bag, 9: Ankle boot.
 * **Strict Evaluation Protocol:** The 60,000 development set is deterministically divided into **50,000 training instances** and **10,000 validation instances** using random seed 42. Hyperparameter tuning, early stopping, and ensemble weight calibration use the validation partition exclusively. The 10,000-sample test set is accessed strictly once for reporting unbiased generalization metrics.
 
-### 3.2 Network Architectures and Hyperparameters
+### 3.2 Optimization Algorithms and Gradient Dynamics
+
+Training a continuous metric space requires optimization functions that can stably update both the feature extractor parameters $	heta$ and the geometric class prototype centroids $\mathcal{P} = \{p_1, \dots, p_C\}$. Because the Soft-KNN loss landscape combines non-linear convolutional mappings with pairwise Euclidean distance manifolds, we systematically evaluated three optimization algorithms:
+
+  * **Decoupled Weight Decay:** Standard L2 regularization in adaptive methods couples weight decay with gradient magnitudes, causing frequently updated weights to receive less shrinkage. AdamW decouples weight decay directly into the parameter update step, providing true Euclidean norm regularization that prevents embedding drift.
+* **Mathematical Formulation:**
+  45997egin{aligned}
+  m_t &= eta_1 m_{t-1} + (1 - eta_1) g_t \
+  v_t &= eta_2 v_{t-1} + (1 - eta_2) g_t^2 \
+  \hat{m}_t &= 
+rac{m_t}{1 - eta_1^t}, \quad \hat{v}_t = 
+rac{v_t}{1 - eta_2^t} \
+  	heta_t &= 	heta_{t-1} - \eta_t \left( 
+rac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda 	heta_{t-1} 
+ight)
+  \end{aligned}45997
+* **Role in This Project:** Used as the primary optimizer with hyperparameters $eta_1 = 0.9, eta_2 = 0.999, \eta_0 = 10^{-3}$, and $\lambda = 10^{-4}$ coupled with a Cosine Annealing learning rate schedule.
+* **Benefits & Empirical Advantage:**
+  * **Decoupled Weight Decay:** Standard L2 regularization in adaptive methods couples weight decay with gradient magnitudes, causing frequently updated weights to receive less shrinkage. AdamW decouples weight decay directly into the parameter update step, providing true Euclidean norm regularization that prevents embedding drift.
+  * **Adaptive Coordinate Scaling:** Individual dimensions of the latent 64-D embedding space learn at different rates. AdamW normalizes step sizes across all coordinates, preventing dominant gradient directions from destabilizing class prototype coordinates.
+  * **Empirical Convergence:** AdamW minimized cross-entropy loss from 1.82 to 0.24 smoothly without oscillations (Figure 5).
+
+#### 2. Stochastic Gradient Descent with Nesterov Momentum (SGD-M)
+* **Mathematical Formulation:**
+  45997v_t = \gamma v_{t-1} + \eta_t 
+abla_	heta \mathcal{L}(	heta_{t-1} + \gamma v_{t-1}), \quad 	heta_t = 	heta_{t-1} - v_t45997
+* **Evaluation in This Project:** Evaluated with learning rate $\eta = 0.01$ and momentum $\gamma = 0.9$.
+* **Trade-off Analysis:** While SGD-M provides strong asymptotic generalization in overparameterized networks, its fixed scalar learning rate across all parameters struggled on the hybrid loss landscape of Soft-KNN. The prototype anchor coordinates updated too slowly relative to the convolutional feature maps, requiring 3x more training epochs to reach equivalent validation accuracy.
+
+#### 3. Root Mean Square Propagation (RMSprop)
+* **Mathematical Formulation:**
+  45997v_t = lpha v_{t-1} + (1 - lpha) g_t^2, \quad 	heta_t = 	heta_{t-1} - 
+rac{\eta}{\sqrt{v_t} + \epsilon} g_t45997
+* **Trade-off Analysis:** Evaluated with $lpha = 0.99, \eta = 10^{-3}$. RMSprop tracks second-order raw moments without first-order momentum smoothing. In our experiments, this caused observable gradient thrashing and validation accuracy jitter near the acute minima of sharp temperature regimes ($	au = 0.1$).
+
+---
+
+### 3.3 Network Architectures and Hyperparameters
 1. **Classical PCA-KNN:** Scikit-Learn implementation with ball tree / brute force indexing, sweeping $k \in \{1, 3, 5, 7, 9, 11, 15\}$, distance weighting functions $w \in \{\text{uniform}, \text{distance}\}$, and PCA dimensions $d \in \{16, 32, 64, 128\}$.
 2. **Convolutional Metric Backbone:**
    * Layer 1: $\text{Conv2D}(1 \to 32, k=3, p=1) \to \text{BatchNorm2D} \to \text{GELU} \to \text{MaxPool2D}(2)$
@@ -299,7 +336,7 @@ Cosine distance outperforms $L_2$ because dividing by the vector $L_2$ norm elim
 Canonical KNN requires computing pairwise distances to all 50,000 training points:
 * **Raw 784-D Search:** Average query latency $= 1.84$ seconds per batch.
 * **PCA 64-D Search:** Average query latency $= 0.26$ seconds per batch (**7.08× acceleration**).
-* **Soft-KNN Inference:** Computing matrix products against 10 learned prototypes requires only **0.02 seconds** per batch (**92× faster than raw KK$-NN**).
+* **Soft-KNN Inference:** Computing matrix products against 10 learned prototypes requires only **0.02 seconds** per batch (**92× faster than raw KNN**).
 
 ---
 
@@ -312,7 +349,7 @@ The full experimental pipeline can be reproduced cell-by-cell without local depe
 2. Ensure GPU hardware acceleration is active (`Runtime > Change runtime type > T4 GPU`).
 3. Select **Run All**. The notebook will:
    * Download Fashion-MNIST via `torchvision.datasets`.
-   * Evaluate baseline classical KK$-NN and generate PCA variance sweeps.
+   * Evaluate baseline classical KNN and generate PCA variance sweeps.
    * Compare optimizers (AdamW vs. SGD vs. RMSprop) and activations (GELU vs. ReLU vs. LeakyReLU).
    * Train the differentiable Soft-KNN model and plot live loss and accuracy diagnostic curves.
    * Compute the final classification report (Precision, Recall, Macro F1) and render the confusion matrix.
@@ -337,7 +374,7 @@ jupyter notebook fashion_knn_clean_pipeline.ipynb
 
 ## 8. Conclusion
 
-This research demonstrates that the classical non-parametric KK$-Nearest Neighbors algorithm can be systematically transformed into a competitive modern vision classifier. By addressing distance concentration through spectral projection (PCA), preserving topological locality with convolutional heads, replacing discrete voting with a differentiable temperature-scaled formulation (**Soft-KNN**), and applying multi-teacher distillation, test accuracy improves from a baseline of **85.24%** to **89.51%** (and **90.85%** validation accuracy). This study bridges foundational non-parametric learning theory and modern gradient-based deep metric optimization.
+This research demonstrates that the classical non-parametric K-Nearest Neighbors algorithm can be systematically transformed into a competitive modern vision classifier. By addressing distance concentration through spectral projection (PCA), preserving topological locality with convolutional heads, replacing discrete voting with a differentiable temperature-scaled formulation (**Soft-KNN**), and applying multi-teacher distillation, test accuracy improves from a baseline of **85.24%** to **89.51%** (and **90.85%** validation accuracy). This study bridges foundational non-parametric learning theory and modern gradient-based deep metric optimization.
 
 ---
 
