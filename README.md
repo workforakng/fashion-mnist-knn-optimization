@@ -80,17 +80,20 @@ flowchart TD
 ## 1. Introduction and Problem Formulation
 
 ### 1.1 Background and Motivation
-The K-Nearest Neighbors (KNN) classification algorithm represents one of the foundational non-parametric paradigms in statistical pattern recognition. Given an annotated training dataset $\mathcal{D}_{\text{train}} = \{(x_i, y_i)\}_{i=1}^{N}$ with feature vectors $x_i \in \mathcal{X} \subseteq \mathbb{R}^D$ and categorical labels $y_i \in \mathcal{Y} = \{1, 2, \dots, C\}$, the canonical KNN rule assigns an unobserved query instance $x^* \in \mathcal{X}$ to the majority class among its K closest neighbors defined under a metric distance function $d: \mathcal{X} \times \mathcal{X} \to \mathbb{R}_{\ge 0}$:
+The K-Nearest Neighbors (KNN) classification algorithm represents one of the foundational non-parametric paradigms in statistical pattern recognition. Given an annotated training dataset:
+$$\mathcal{D}_{\text{train}} = \{(x_i, y_i)\}_{i=1}^{N}, \quad x_i \in \mathbb{R}^D, \quad y_i \in \{1, 2, \dots, C\}$$
 
-$$\hat{y}(x^*) = \arg\max_{c \in \mathcal{Y}} \sum_{i \in \mathcal{N}_K(x^*)} \mathbb{I}(y_i = c)$$
+the canonical KNN decision rule assigns an unobserved query instance $x_q \in \mathbb{R}^D$ to the majority class among its $K$ nearest neighbors under a metric distance function $d(x_q, x_i)$:
 
-where $\mathcal{N}_K(x^*)$ designates the index set of the $K$ smallest distances $d(x^*, x_i)$, and $\mathbb{I}(\cdot)$ denotes the indicator function. According to the foundational Cover-Hart theorem, as the number of independent and identically distributed (i.i.d.) training samples approaches infinity ($N \to \infty$), the asymptotic probability of error $R$ for the $1$-NN classifier is strictly bounded relative to the optimal Bayes risk $R^*$ by:
+$$\hat{y}(x_q) = \arg\max_{c} \sum_{i \in \mathcal{N}_K(x_q)} \mathbb{I}(y_i = c)$$
+
+where $\mathcal{N}_K(x_q)$ designates the index set of the $K$ smallest pairwise distances, and $\mathbb{I}(\cdot)$ denotes the indicator function. According to the Cover-Hart theorem, as the number of independent training samples approaches infinity ($N \to \infty$), the asymptotic error rate $R$ of the nearest neighbor rule is bounded relative to the Bayes risk $R^*$ by:
 
 $$R^* \le R \le R^* \left( 2 - \frac{C}{C-1} R^* \right)$$
 
-Despite these theoretical guarantees, canonical KNN displays severe degradation when applied directly to raw rasterized image arrays, such as the Zalando Fashion-MNIST benchmark ($N_{\text{train}} = 60,000$, $N_{\text{test}} = 10,000$, $C = 10$, $D = 28 \times 28 = 784$). This drop in efficacy arises from three structural impediments:
-1. **Curse of Dimensionality and Metric Concentration:** As ambient dimension $D$ grows, the relative difference between the distance to the nearest neighbor and the distance to the furthest neighbor vanishes uniformly:
-   $$\lim_{D \to \infty} \mathbb{P}\left( \frac{\max_{i} \|x^* - x_i\|_2 - \min_{i} \|x^* - x_i\|_2}{\min_{i} \|x^* - x_i\|_2} \le \epsilon \right) = 1, \quad \forall \epsilon > 0$$
+Despite these asymptotic guarantees, standard KNN degrades on raw rasterized image pixels ($D = 28 \times 28 = 784$) due to three structural factors:
+1. **Curse of Dimensionality:** As dimension $D$ grows, Euclidean distances concentrate, causing the relative difference between nearest and furthest samples to vanish:
+   $$\lim_{D \to \infty} \frac{\max_i \|x_q - x_i\|_2 - \min_i \|x_q - x_i\|_2}{\min_i \|x_q - x_i\|_2} = 0$$
    Consequently, neighborhood boundaries lose discriminative selectivity.
 2. **Disregard of 2D Spatial Locality:** Vectorizing a 2D matrix $I \in \mathbb{R}^{28 \times 28}$ into $x \in \mathbb{R}^{784}$ destroys pixel topological adjacency. An infinitesimal spatial translation of 1 or 2 pixels produces an enormous Euclidean displacement in $\mathbb{R}^{784}$, despite semantic identity remaining invariant.
 3. **Non-Differentiability of the Decision Boundary:** The hard $\arg\max$ majority voting operator possesses zero gradients almost everywhere, preventing end-to-end parameter optimization via backpropagation.
@@ -176,7 +179,7 @@ where $\tau \in (0, \infty)$ acts as a thermodynamic temperature parameter:
   $$\lim_{\tau \to \infty} P(y = c \mid x) = \frac{1}{C}$$
 
 The parameters $\theta$ and prototype vectors $\mathcal{P}$ are trained simultaneously by minimizing the empirical regularized cross-entropy loss over mini-batches $\mathcal{B}$:
-$$\mathcal{L}_{\text{Soft-KNN}K\text{NN}}(\theta, \mathcal{P}) = -\frac{1}{|\mathcal{B}|} \sum_{i \in \mathcal{B}} \log P(y = y_i \mid x_i; \theta, \mathcal{P}, \tau) + \frac{\lambda}{2} \|\theta\|_2^2$$
+$$\mathcal{L}_{\text{Soft-KNN}}(\theta, \mathcal{P}) = -\frac{1}{|\mathcal{B}|} \sum_{i \in \mathcal{B}} \log P(y = y_i \mid x_i; \theta, \mathcal{P}, \tau) + \frac{\lambda}{2} \|\theta\|_2^2$$
 Gradients with respect to embedding $z_i = f_\theta(x_i)$ take the analytical form:
 $$\frac{\partial \mathcal{L}_i}{\partial z_i} = \frac{1}{\tau} \sum_{c=1}^{C} \left( P(y = c \mid x_i) - \mathbb{I}(y_i = c) \right) \frac{z_i - p_c}{\|z_i - p_c\|_2}$$
 This gradient formulation exerts an attractive force pulling the embedding $z_i$ toward the ground-truth prototype $p_{y_i}$ while exerting repulsive forces that push $z_i$ away from non-target prototypes $p_{c \ne y_i}$, proportional to their misclassified posterior mass.
@@ -204,21 +207,17 @@ Experiments are evaluated on Zalando's Fashion-MNIST benchmark:
 
 ### 3.2 Optimization Algorithms and Gradient Dynamics
 
-Training a continuous metric space requires optimization functions that can stably update both the feature extractor parameters $	heta$ and the geometric class prototype centroids $\mathcal{P} = \{p_1, \dots, p_C\}$. Because the Soft-KNN loss landscape combines non-linear convolutional mappings with pairwise Euclidean distance manifolds, we systematically evaluated three optimization algorithms:
+Training a continuous metric space requires optimization functions that can stably update both the feature extractor parameters $\theta$ and the geometric class prototype centroids $\mathcal{P} = \{p_1, \dots, p_C\}$. Because the Soft-KNN loss landscape combines non-linear convolutional mappings with pairwise Euclidean distance manifolds, we systematically evaluated three optimization algorithms:
 
-  * **Decoupled Weight Decay:** Standard L2 regularization in adaptive methods couples weight decay with gradient magnitudes, causing frequently updated weights to receive less shrinkage. AdamW decouples weight decay directly into the parameter update step, providing true Euclidean norm regularization that prevents embedding drift.
+#### 1. AdamW (Decoupled Weight Decay Regularization) — Selected Champion
 * **Mathematical Formulation:**
-  45997egin{aligned}
-  m_t &= eta_1 m_{t-1} + (1 - eta_1) g_t \
-  v_t &= eta_2 v_{t-1} + (1 - eta_2) g_t^2 \
-  \hat{m}_t &= 
-rac{m_t}{1 - eta_1^t}, \quad \hat{v}_t = 
-rac{v_t}{1 - eta_2^t} \
-  	heta_t &= 	heta_{t-1} - \eta_t \left( 
-rac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda 	heta_{t-1} 
-ight)
-  \end{aligned}45997
-* **Role in This Project:** Used as the primary optimizer with hyperparameters $eta_1 = 0.9, eta_2 = 0.999, \eta_0 = 10^{-3}$, and $\lambda = 10^{-4}$ coupled with a Cosine Annealing learning rate schedule.
+  $$\begin{aligned}
+  m_t &= \beta_1 m_{t-1} + (1 - \beta_1) g_t \\
+  v_t &= \beta_2 v_{t-1} + (1 - \beta_2) g_t^2 \\
+  \hat{m}_t &= \frac{m_t}{1 - \beta_1^t}, \quad \hat{v}_t = \frac{v_t}{1 - \beta_2^t} \\
+  \theta_t &= \theta_{t-1} - \eta_t \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1} \right)
+  \end{aligned}$$
+* **Role in This Project:** Used as the primary optimizer with hyperparameters $\beta_1 = 0.9, \beta_2 = 0.999, \eta_0 = 10^{-3}$, and $\lambda = 10^{-4}$ coupled with a Cosine Annealing learning rate schedule.
 * **Benefits & Empirical Advantage:**
   * **Decoupled Weight Decay:** Standard L2 regularization in adaptive methods couples weight decay with gradient magnitudes, causing frequently updated weights to receive less shrinkage. AdamW decouples weight decay directly into the parameter update step, providing true Euclidean norm regularization that prevents embedding drift.
   * **Adaptive Coordinate Scaling:** Individual dimensions of the latent 64-D embedding space learn at different rates. AdamW normalizes step sizes across all coordinates, preventing dominant gradient directions from destabilizing class prototype coordinates.
@@ -226,19 +225,16 @@ ight)
 
 #### 2. Stochastic Gradient Descent with Nesterov Momentum (SGD-M)
 * **Mathematical Formulation:**
-  45997v_t = \gamma v_{t-1} + \eta_t 
-abla_	heta \mathcal{L}(	heta_{t-1} + \gamma v_{t-1}), \quad 	heta_t = 	heta_{t-1} - v_t45997
+  $$v_t = \gamma v_{t-1} + \eta_t \nabla_\theta \mathcal{L}(\theta_{t-1} + \gamma v_{t-1}), \quad \theta_t = \theta_{t-1} - v_t$$
 * **Evaluation in This Project:** Evaluated with learning rate $\eta = 0.01$ and momentum $\gamma = 0.9$.
 * **Trade-off Analysis:** While SGD-M provides strong asymptotic generalization in overparameterized networks, its fixed scalar learning rate across all parameters struggled on the hybrid loss landscape of Soft-KNN. The prototype anchor coordinates updated too slowly relative to the convolutional feature maps, requiring 3x more training epochs to reach equivalent validation accuracy.
 
 #### 3. Root Mean Square Propagation (RMSprop)
 * **Mathematical Formulation:**
-  45997v_t = lpha v_{t-1} + (1 - lpha) g_t^2, \quad 	heta_t = 	heta_{t-1} - 
-rac{\eta}{\sqrt{v_t} + \epsilon} g_t45997
-* **Trade-off Analysis:** Evaluated with $lpha = 0.99, \eta = 10^{-3}$. RMSprop tracks second-order raw moments without first-order momentum smoothing. In our experiments, this caused observable gradient thrashing and validation accuracy jitter near the acute minima of sharp temperature regimes ($	au = 0.1$).
+  $$v_t = \alpha v_{t-1} + (1 - \alpha) g_t^2, \quad \theta_t = \theta_{t-1} - \frac{\eta}{\sqrt{v_t} + \epsilon} g_t$$
+* **Trade-off Analysis:** Evaluated with $\alpha = 0.99, \eta = 10^{-3}$. RMSprop tracks second-order raw moments without first-order momentum smoothing. In our experiments, this caused observable gradient thrashing and validation accuracy jitter near the acute minima of sharp temperature regimes ($\tau = 0.1$).
 
 ---
-
 ### 3.3 Network Architectures and Hyperparameters
 1. **Classical PCA-KNN:** Scikit-Learn implementation with ball tree / brute force indexing, sweeping $k \in \{1, 3, 5, 7, 9, 11, 15\}$, distance weighting functions $w \in \{\text{uniform}, \text{distance}\}$, and PCA dimensions $d \in \{16, 32, 64, 128\}$.
 2. **Convolutional Metric Backbone:**
