@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+data/
+*.pyc
+.DS_Store
+
+# Model artefacts (regenerable by retraining)
+artifacts/
+
+# Logs & OS noise
+*.log
+nohup.out
+.pytest_cache/
+
+# Machine-specific storage inventory (per user request)
+storage.md
+.omo/
+.opencode/

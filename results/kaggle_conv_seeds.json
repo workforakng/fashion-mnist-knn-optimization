@@ -1,0 +1,20 @@
+{
+  "42": {
+    "val_acc": 0.892,
+    "test_acc": 0.8744,
+    "best_train_val": 0.8925,
+    "epochs_run": 35
+  },
+  "7": {
+    "val_acc": 0.8898333333333334,
+    "test_acc": 0.8725,
+    "best_train_val": 0.889,
+    "epochs_run": 35
+  },
+  "123": {
+    "val_acc": 0.8855,
+    "test_acc": 0.8754,
+    "best_train_val": 0.8865,
+    "epochs_run": 13
+  }
+}
