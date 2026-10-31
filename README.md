@@ -2,20 +2,25 @@
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/workforakng/fashion-mnist-knn-optimization/blob/main/fashion_knn_colab.ipynb)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.3%2B-red.svg)](https://pytorch.org)
 [![Accuracy](https://img.shields.io/badge/Test%20Accuracy-89.51%25-brightgreen.svg)](#4-empirical-evaluation-and-benchmark-results)
 
 **Authors:** Akshar Nath Gorain et al.  
 **Affiliation:** Department of Computer Science & Machine Learning Research Group  
 **Target Venue:** Machine Learning & Pattern Recognition Coursework  
-**Repository & Codebase:** [GitHub Repository / Standalone Reproduction Notebook](fashion_knn_colab.ipynb)  
-**Execution Environment:** Ubuntu 24.04 LTS, PyTorch 2.4, NVIDIA RTX GPU / Google Colab T4 Accelerator  
+**Codebase:** `src/` (pipeline), `scripts/` (seed and distillation trainers), `results/` (logs); [`fashion_knn_colab.ipynb`](fashion_knn_colab.ipynb) is a simplified demo only (see §7)  
+**Execution Environment:** Python ≥ 3.10, PyTorch ≥ 2.3. `src/experiments.py` ran on the authors' local machine; the conv-seed and distillation runs in `results/kaggle_*.json` ran on Kaggle GPUs  
 
 ---
 
 ## Abstract
 
-Non-parametric instance-based classifiers, notably the K-Nearest Neighbors (KNN) algorithm, possess asymptotic Bayes-optimal error bounds under infinite sample regimes. However, when deployed on high-dimensional vision benchmarks such as Fashion-MNIST ($D = 784$), classical KNN exhibits degraded classification fidelity (~85.24% top-1 accuracy) and prohibitive $\mathcal{O}(N \cdot D)$ inference latency. This degradation stems from the phenomenon of distance concentration in metric spaces of high intrinsic dimension—commonly known as the *curse of dimensionality*—as well as the rigid assumption of spatial isometry across raw pixel vectors. In this investigation, we formulate a principled optimization hierarchy that systematically addresses the theoretical limitations of instance-based classification. First, we characterize the variance spectrum via Principal Component Analysis (PCA), demonstrating that projectively compressing the input manifold to $d=64$ preserves over 85.3% of the total spectral variance, suppresses high-frequency sensor noise, enhances test accuracy to 86.43%, and delivers a 7.14× query latency acceleration. Second, we introduce **Soft-KNN**, a differentiable metric learning framework that replaces the non-differentiable discrete majority voting operator with a continuous, temperature-scaled ($\tau$) Boltzmann assignment over pairwise Euclidean distances computed against learnable class prototypes. Third, we establish a topology-preserving 2D convolutional embedding backbone paired with regularized spatial stochastic augmentations, expanding the feature representation beyond rigid translation boundaries. Fourth, we deploy multi-teacher knowledge distillation to guide the metric geometry of the student representation space. Finally, through an empirical convex ensemble fusion across seven diversified metric heads, our proposed architecture achieves **89.51% test accuracy** and **90.85% validation accuracy** on the full 10,000-sample Fashion-MNIST test benchmark. We provide exhaustive empirical evidence, diagnostic loss and bias-variance learning curves, hyperparameter sensitivity sweeps, ablation studies, and an error matrix analysis illustrating class boundary confusions.
+Non-parametric instance-based classifiers, notably the K-Nearest Neighbors (KNN) algorithm, possess asymptotic Bayes-optimal error bounds under infinite sample regimes. However, when deployed on high-dimensional vision benchmarks such as Fashion-MNIST ($D = 784$), classical KNN exhibits degraded classification fidelity (~85.24% top-1 accuracy) and prohibitive $\mathcal{O}(N \cdot D)$ inference latency. This degradation stems from distance concentration in high-dimensional spaces (the *curse of dimensionality*) and from comparing raw pixel vectors that are not aligned. We address it in stages, with every number logged in [`results/results.json`](results/results.json):
+1. **PCA.** Projecting to $d=64$ components keeps ≈ 88 % of the variance (90 % needs $d \approx 84$). A tuned KNN on it (Optuna: $k=5$, Manhattan, distance weights) reaches 86.43 % test accuracy. Brute-force query time over the 6,000 validation queries drops from 2.98 s to 0.418 s (7.12×).
+2. **Soft-KNN.** We train a metric so that a temperature-scaled softmax over per-class nearest-neighbour distances (against a memory bank of all 54,000 training embeddings) predicts the label.
+3. **Convolutional embedding.** A small conv embedding replaces the linear projection (87.63 % for seed 42).
+4. **Seed ensemble and distillation.** A 3-seed ensemble is distilled into a single student (89.03 %; trained on Kaggle).
+5. **Fusion.** A validation-weighted fusion of the distilled student, a bank-augmented linear Soft-KNN and the classical PCA-KNN, with test-time augmentation, gives **89.51 % test** / **90.85 % validation** accuracy (ledger E25).
 
 **Keywords: ** K-Nearest Neighbors (KNN), Differentiable Metric Learning, Soft-KNN, Fashion-MNIST, Dimensionality Reduction, Principal Component Analysis, Knowledge Distillation, Ensemble Fusion.
 
@@ -27,26 +32,28 @@ Non-parametric instance-based classifiers, notably the K-Nearest Neighbors (KNN)
 flowchart TD
     subgraph S1["1. Data Ingestion and Preprocessing"]
         A["Fashion-MNIST Dataset (70,000 Images 28x28)"] --> B["Intensity Normalization to [0, 1]"]
-        B --> C["Deterministic Split: 50k Train / 10k Val / 10k Test"]
+        B --> C["Stratified split of the 60k train set: 54k fit / 6k val (seed 42); official 10k test"]
     end
 
     subgraph S2["2. Classical Space and Dimensionality Reduction"]
         C --> D["Raw Ambient Space (784-D) Baseline KNN (k=5): 85.24%"]
         C --> E["Principal Component Analysis: Projection to 64-D Space"]
-        E --> F["Tuned PCA-KNN (k=7, Cosine): 86.43% (7.14x Faster)"]
+        E --> F["Optuna-tuned PCA-KNN (k=5, Manhattan, distance): 86.43% (brute query 7.12x faster)"]
     end
 
     subgraph S3["3. Differentiable Soft-KNN Metric Learning"]
-        C --> G["Data Augmentation (RandomCrop + HorizontalFlip)"]
-        G --> H["ConvNet Feature Backbone (64-D Latent Space)"]
-        H --> I["Metric Prototype Head: Distance to Class Centroids"]
-        I --> J["Temperature Softmax Layer (tau=0.1): 87.63%"]
+        C --> G["Linear 784-to-128 metric (PCA warm start): 87.10%; bank-augmented: 87.13%"]
+        C --> H["Conv metric, 128-D embedding (seed 42, no augmentation)"]
+        H --> I["Memory bank of all 54k training embeddings: mean of k nearest per class"]
+        I --> J["Softmax over -distance / tau (inference k=9, tau=0.1): 87.63%"]
     end
 
     subgraph S4["4. Distillation and Multi-Source Ensemble Fusion"]
-        J --> K["Multi-Seed ConvNet Ensemble: 88.06%"]
-        K --> L["Multi-Teacher Distillation to Student: 89.03%"]
-        L --> M["Grand Convex Fusion Engine (E25): 89.51% Test (90.85% Val)"]
+        J --> K["3-Seed Conv Ensemble: 88.06%"]
+        K --> L["Distillation of the 3-seed ensemble into one student (Kaggle): 89.03%"]
+        L --> M["Weighted fusion + TTA (E25): 89.51% Test (90.85% Val)"]
+        G --> M
+        F --> M
     end
 ```
 
@@ -77,11 +84,11 @@ Despite these asymptotic guarantees, standard KNN degrades on raw rasterized ima
 
 ### 1.2 Contributions of This Study
 To resolve these bottlenecks while strictly preserving the instance-based metric inductive bias, this research presents the following technical contributions:
-* **Exhaustive Classical Baseline Characterization:** We benchmark Euclidean ($L_2$), Manhattan ($L_1$), and Cosine metrics, validating the efficacy of spectral projection (PCA) in mitigating distance concentration.
-* **Formulation of Differentiable Soft-KNN:** We propose a novel formulation replacing discrete voting with a temperature-parameterized ($\tau$) continuous assignment against learned prototype anchors in embedding space.
-* **Topological Convolutional Metric Heads:** We design a lightweight, compute-efficient 2D convolutional backbone that extracts translation-invariant feature vectors while remaining viable for rapid instance-based inference.
-* **Multi-Teacher Representation Distillation:** We apply soft-target knowledge distillation to align student metric spaces with ensemble dark knowledge.
-* **Empirical Optimization Progression:** We report an incremental progression across 28 logged experiment iterations, advancing the empirical test boundary from **85.24%** (raw baseline) to **89.51%** (final 7-source fusion).
+* **Classical baseline:** raw-pixel KNN, a PCA dimension sweep, an Optuna search over (k, metric, weights) at fixed PCA-64, a bias-variance sweep over k and a latency benchmark.
+* **Soft-KNN:** a temperature-scaled ($\tau$) softmax over per-class nearest-neighbour distances in a learned embedding, trained end-to-end against a memory bank of training embeddings (closely related to NCA [4]).
+* **Convolutional metric:** a small 2-layer conv embedding in place of the linear projection.
+* **Distillation:** soft targets from a 3-seed conv ensemble train a single conv student (Hinton et al. [6]).
+* **Progression:** 28 ledger entries (26 distinct stages, E0–E26 without E18) move test accuracy from **85.24%** (raw baseline) to **89.51%** (E25 fusion; 7 candidate sources, 3 with non-zero weight).
 
 ---
 
@@ -117,34 +124,28 @@ $$z_i = W_{\text{PCA}}^T (x_i - \mu), \quad W_{\text{PCA}} = [v_1, \dots, v_d] \
 The cumulative variance retained by $d$ components equals:
 $$\eta(d) = \frac{\sum_{j=1}^{d} \lambda_j}{\sum_{k=1}^{D} \lambda_k}$$
 
-#### C. Novelty: Formulation of Differentiable Soft-KNN
-To bypass the non-differentiable step of standard voting, we define a continuous metric mapping. Let $f_\theta: \mathcal{X} \to \mathbb{R}^d$ represent a parameterized non-linear backbone network with weights $\theta$. We introduce a set of learnable class prototype anchors $\mathcal{P} = \{p_1, p_2, \dots, p_C\}$, where each $p_c \in \mathbb{R}^d$ denotes the geometric centroid of class $c$ in embedding space.
+#### C. Soft-KNN (as implemented in `src/softknn.py`)
+Let $f_\theta: \mathbb{R}^{784} \to \mathbb{R}^{128}$ be the embedding (a linear projection warm-started from PCA, a 1-hidden-layer MLP, or a small conv net), with L2-normalised output. Let $\{(z_j, y_j)\}_{j=1}^{N}$, $z_j = f_\theta(x_j)$, be a **memory bank** of the embeddings of all $N = 54{,}000$ training images. The bank is detached and refreshed once per epoch (linear models) or every 107 steps (MLP and conv models). There are **no learnable prototypes**.
 
-For an arbitrary input instance $x$, the Euclidean distance to prototype $c$ is:
-$$d_c(x; \theta) = \|f_\theta(x) - p_c\|_2$$
-We formulate the categorical posterior distribution via a temperature-scaled Gibbs-Boltzmann distribution:
-$$P(y = c \mid x; \theta, \mathcal{P}, \tau) = \frac{\exp\left( -\frac{d_c(x; \theta)}{\tau} \right)}{\sum_{k=1}^{C} \exp\left( -\frac{d_k(x; \theta)}{\tau} \right)}$$
-where $\tau \in (0, \infty)$ acts as a thermodynamic temperature parameter:
-* As $\tau \to 0^+$, the distribution converges to a hard, discrete nearest-prototype assignment:
-  $$\lim_{\tau \to 0^+} P(y = c \mid x) = \begin{cases} 1, & \text{if } c = \arg\min_k d_k(x) \\ 0, & \text{otherwise} \end{cases}$$
-* As $\tau \to \infty$, the distribution approaches maximum entropy (uniform uncertainty):
-  $$\lim_{\tau \to \infty} P(y = c \mid x) = \frac{1}{C}$$
+For a query $x$ and class $c$, let $d_c(x)$ be the mean of the $k$ smallest distances $\|f_\theta(x) - z_j\|_2$ over bank entries with $y_j = c$ ($k$ anchors **per class**). The class posterior is
 
-The parameters $\theta$ and prototype vectors $\mathcal{P}$ are trained simultaneously by minimizing the empirical regularized cross-entropy loss over mini-batches $\mathcal{B}$:
-$$\mathcal{L}_{\text{Soft-KNN}}(\theta, \mathcal{P}) = -\frac{1}{|\mathcal{B}|} \sum_{i \in \mathcal{B}} \log P(y = y_i \mid x_i; \theta, \mathcal{P}, \tau) + \frac{\lambda}{2} \|\theta\|_2^2$$
-Gradients with respect to embedding $z_i = f_\theta(x_i)$ take the analytical form:
-$$\frac{\partial \mathcal{L}_i}{\partial z_i} = \frac{1}{\tau} \sum_{c=1}^{C} (P(y = c \mid x_i) - \mathbb{I}(y_i = c)) \frac{z_i - p_c}{\|z_i - p_c\|_2}$$
-This gradient formulation exerts an attractive force pulling the embedding $z_i$ toward the ground-truth prototype $p_{y_i}$ while exerting repulsive forces that push $z_i$ away from non-target prototypes $p_{c \ne y_i}$, proportional to their misclassified posterior mass.
+$$P(y = c \mid x) = \frac{\exp(-d_c(x)/\tau)}{\sum_{c'=1}^{C} \exp(-d_{c'}(x)/\tau)}$$
 
-#### D. Multi-Teacher Knowledge Distillation
-To compress dark knowledge from diverse models into the student metric head, we formulate the composite objective:
-$$\mathcal{L}_{\text{Distill}} = (1 - \alpha) \mathcal{L}_{\text{CE}}(P_S, y) + \alpha T^2 D_{\text{KL}}\left( \sigma(z_T / T) \parallel \sigma(z_S / T) \right)$$
-where $T$ represents distillation temperature, $\alpha \in [0, 1]$ balances ground-truth vs. soft supervision, and $\mathcal{D}_{\text{KL}}$ is the Kullback-Leibler divergence.
+and training minimises the cross-entropy $-\log P(y = y_i \mid x_i)$ with plain Adam (no weight decay). Gradients flow only through the query embedding $f_\theta(x)$; the top-$k$ selection has no gradient and the bank is detached.
 
-#### E. Convex Multi-Source Ensemble Fusion
-Given $M$ distinct model hypotheses providing predicted probability distributions $P_m(y \mid x)$, the ensemble posterior is parameterized as:
-$$P_{\text{Ensemble}}(y = c \mid x) = \sum_{m=1}^{M} w_m P_m(y = c \mid x), \quad \text{s.t.} \quad \sum_{m=1}^{M} w_m = 1, \quad w_m \ge 0$$
-Weights $w = [w_1, \dots, w_M]^T$ are calibrated via constrained optimization over the held-out 10,000-sample validation split.
+Notes:
+* $\tau$ rescales all logits equally, so it **does not change the predicted class**, only the confidence. As $\tau \to 0$ the prediction stays $\arg\min_c d_c(x)$, a local-mean rule, not a majority vote.
+* **Self-match.** Training queries are also in the bank, so each one finds itself at distance ≈ 0. This inflates the logged *train* accuracy by about 8–10 pt; validation and test images are never in the bank. An opt-in leave-one-out fix exists (`exclude_self`; see [`src/README.md`](src/README.md)); the logged results were produced without it.
+
+#### D. Distillation
+The teacher distribution $p_T$ is the mean softmax output of the 3 conv-seed models on each training image ($k=9$, $\tau=1$). The student is trained with
+$$\mathcal{L} = (1 - \alpha)\, \mathcal{L}_{\text{CE}}(p_S, y) + \alpha\, T^2\, D_{\text{KL}}(p_T \parallel p_S), \qquad \alpha = 0.5,\ T = 1.$$
+The teacher is evaluated on images that are in its own memory bank, so its soft targets are biased toward the hard labels (see the self-match note above).
+
+#### E. Weighted Multi-Source Fusion
+Given $M$ sources with probability outputs $P_m(y \mid x)$, the fused posterior is
+$$P_{\text{fused}}(y = c \mid x) = \sum_{m=1}^{M} w_m P_m(y = c \mid x), \quad \sum_{m} w_m = 1, \quad w_m \ge 0.$$
+The weights are chosen by grid search (step 0.1 on the simplex) on the **6,000-image validation split**. Because that split is also used for early stopping and for the other hyper-parameter choices, the 90.85 % validation figure is optimistic; the test figure is the held-out estimate.
 
 ---
 
@@ -155,103 +156,102 @@ Experiments are evaluated on Zalando's Fashion-MNIST benchmark:
 * **Sample Count:** 70,000 total observations (60,000 development, 10,000 testing).
 * **Dimensionality:** Grayscale rasters of $28 \times 28$ pixels ($D = 784$).
 * **Categories ($C=10$):** 0: T-shirt/top, 1: Trouser, 2: Pullover, 3: Dress, 4: Coat, 5: Sandal, 6: Shirt, 7: Sneaker, 8: Bag, 9: Ankle boot.
-* **Strict Evaluation Protocol:** The 60,000 development set is deterministically divided into **50,000 training instances** and **10,000 validation instances** using random seed 42. Hyperparameter tuning, early stopping, and ensemble weight calibration use the validation partition exclusively. The 10,000-sample test set is accessed strictly once for reporting unbiased generalization metrics.
+* **Evaluation Protocol:** The 60,000 development images are split (stratified, seed 42) into **54,000 fit** and **6,000 validation** images (`src/data.py`). The official 10,000 test images are kept separate. PCA, Optuna, $\tau$ and $(k, \tau)$ grids, early stopping and fusion weights are all chosen on the validation split. Pixels are scaled to [0, 1].
 
-### 3.2 Optimization Algorithms and Gradient Dynamics
+### 3.2 Optimizer Study (ledger E9)
 
-Training a continuous metric space requires optimization functions that can stably update both the feature extractor parameters $\theta$ and the geometric class prototype centroids $\mathcal{P} = \{p_1, \dots, p_C\}$. Because the Soft-KNN loss landscape combines non-linear convolutional mappings with pairwise Euclidean distance manifolds, we systematically evaluated three optimization algorithms:
+E9 trains the linear Soft-KNN (PCA-64 warm start, 128-D embedding, training $\tau=0.5$, $k=7$, flip + shift + erase query augmentation as in E7, up to 10 epochs) with three optimizers from `src/train.py`:
 
-#### 1. AdamW (Decoupled Weight Decay Regularization) — Selected Champion
+| Optimizer | Learning rate | Best val acc during training (stale bank, $\tau=0.5$) | Val acc of the returned model (fresh bank, inference $\tau=0.1$) |
+| :--- | :---: | :---: | :---: |
+| **SGD**, momentum 0.9 (no Nesterov) | 0.1 | **83.85 %** | **86.22 %** |
+| Adam (plain, no weight decay) | 1e-3 | 81.47 % | 82.50 % |
+| RMSprop | 1e-3 | 80.83 % | 82.72 % |
 
-**Parameter Update Equations:**
-$$
-\begin{aligned}
-m_t &= \beta_1 m_{t-1} + (1 - \beta_1) g_t \\
-v_t &= \beta_2 v_{t-1} + (1 - \beta_2) g_t^2 \\
-\hat{m}_t &= \frac{m_t}{1 - \beta_1^t}, \quad \hat{v}_t = \frac{v_t}{1 - \beta_2^t} \\
-\theta_t &= \theta_{t-1} - \eta_t \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1} \right)
-\end{aligned}
-$$
-
-* **Role in This Project:** Used as the primary optimizer with hyperparameters $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\eta_0 = 10^{-3}$, and $\lambda = 10^{-4}$ coupled with a Cosine Annealing learning rate schedule.
-* **Benefits & Empirical Advantage:**
-  * **Decoupled Weight Decay:** Standard L2 regularization in adaptive methods couples weight decay with gradient magnitudes, causing frequently updated weights to receive less shrinkage. AdamW decouples weight decay directly into the parameter update step, providing true Euclidean norm regularization that prevents embedding drift.
-  * **Adaptive Coordinate Scaling:** Individual dimensions of the latent 64-D embedding space learn at different rates. AdamW normalizes step sizes across all coordinates, preventing dominant gradient directions from destabilizing class prototype coordinates.
-  * **Empirical Convergence:** AdamW minimized cross-entropy loss from 1.82 to 0.24 smoothly without oscillations (Figure 5).
-
-#### 2. Stochastic Gradient Descent with Nesterov Momentum (SGD-M)
-
-**Parameter Update Equations:**
-$$
-v_t = \gamma v_{t-1} + \eta_t \nabla_\theta \mathcal{L}(\theta_{t-1} + \gamma v_{t-1}), \quad \theta_t = \theta_{t-1} - v_t
-$$
-
-* **Evaluation in This Project:** Evaluated with learning rate $\eta = 0.01$ and momentum $\gamma = 0.9$.
-* **Trade-off Analysis:** While SGD-M provides strong asymptotic generalization in overparameterized networks, its fixed scalar learning rate across all parameters struggled on the hybrid loss landscape of Soft-KNN. The prototype anchor coordinates updated too slowly relative to the convolutional feature maps, requiring 3x more training epochs to reach equivalent validation accuracy.
-
-#### 3. Root Mean Square Propagation (RMSprop)
-
-**Parameter Update Equations:**
-$$
-v_t = \alpha v_{t-1} + (1 - \alpha) g_t^2, \quad \theta_t = \theta_{t-1} - \frac{\eta}{\sqrt{v_t} + \epsilon} g_t
-$$
-
-* **Trade-off Analysis:** Evaluated with $\alpha = 0.99, \eta = 10^{-3}$. RMSprop tracks second-order raw moments without first-order momentum smoothing. In our experiments, this caused observable gradient thrashing and validation accuracy jitter near the acute minima of sharp temperature regimes ($\tau = 0.1$).
+* **SGD won** on validation accuracy and is the E9 winner (`"best": "sgd"`). See Figure 5.
+* The learning rates differ by 100×, so this is not a controlled comparison.
+* The two columns are scored differently (stale vs. fresh memory bank, inference $\tau$ 0.5 vs. 0.1), so they are not comparable with each other.
+* Despite this result, every later stage uses **Adam** (lr 1e-3 for linear models, 3e-4 with gradient clipping 1.0 for MLP/conv models). No AdamW is used anywhere in `src/`.
+* No activation-function study was run.
 
 ---
 ### 3.3 Network Architectures and Hyperparameters
-1. **Classical PCA-KNN:** Scikit-Learn implementation with ball tree / brute force indexing, sweeping $k \in \{1, 3, 5, 7, 9, 11, 15\}$, distance weighting functions $w \in \{\text{uniform}, \text{distance}\}$, and PCA dimensions $d \in \{16, 32, 64, 128\}$.
-2. **Convolutional Metric Backbone:**
-   * Layer 1: $\text{Conv2D}(1 \to 32, k=3, p=1) \to \text{BatchNorm2D} \to \text{GELU} \to \text{MaxPool2D}(2)$
-   * Layer 2: $\text{Conv2D}(32 \to 64, k=3, p=1) \to \text{BatchNorm2D} \to \text{GELU} \to \text{MaxPool2D}(2)$
-   * Dense Projector: $\text{Linear}(64 \times 7 \times 7 \to 128) \to \text{GELU} \to \text{Dropout}(0.2) \to \text{Linear}(128 \to 64)$
-3. **Training Specifications:**
-   * Optimizer: AdamW ($\beta_1=0.9, \beta_2=0.999$, weight decay $= 10^{-4}$).
-   * Learning Rate Schedule: Cosine annealing schedule ($lr_0 = 10^{-3}$, $lr_{\min} = 10^{-5}$).
-   * Batch Size: 128 training, 256 evaluation.
-   * Data Augmentation: Random horizontal reflection ($p=0.5$), Random cropping ($28 \times 28$, padding $=2$, edge reflection mode).
+1. **Classical PCA-KNN** (scikit-learn):
+   * PCA sweep over $d \in \{10, 20, 32, 48, 64, 80, 96, 128\}$ with $k=5$, Euclidean (E2); best $d = 64$.
+   * Optuna TPE search at fixed PCA-64 over $k \in \{3, 5, \dots, 15\}$, weights ∈ {uniform, distance}, metric ∈ {euclidean, manhattan, chebyshev, minkowski} (E3). Winner: $k=5$, Manhattan, distance weights.
+   * Bias-variance sweep over $k \in \{1, 3, \dots, 25\}$ (E4).
+2. **Linear Soft-KNN:** 784 → 128 linear projection, warm-started from the PCA components, L2-normalised. The MLP variant is 784 → 256 (ReLU) → 128.
+3. **Conv Soft-KNN:**
+   * $\text{Conv2D}(1 \to 32, 3\times3) \to \text{ReLU} \to \text{MaxPool}(2)$
+   * $\to \text{Conv2D}(32 \to 64, 3\times3) \to \text{ReLU} \to \text{MaxPool}(2)$
+   * $\to \text{Linear}(64 \cdot 7 \cdot 7 \to 128)$, L2-normalised.
+   * No BatchNorm, GELU or Dropout.
+4. **Training:**
+   * Adam (no weight decay), no learning-rate schedule, batch size 256.
+   * Training $\tau = 0.5$, $k = 7$.
+   * Early stopping on validation accuracy (patience 4 for linear, 6 for MLP, 8–10 for conv).
+   * Conv runs in `scripts/` use AMP on CUDA.
+5. **Augmentation** (pure PyTorch, `src/augment.py`):
+   * Horizontal flip, ±2 px shift and random erasing; there is no random crop.
+   * Applied to training queries in E7 (all three) and E13/E20 (shift only), and to extra bank copies in E14.
+   * Test-time augmentation averages 6 views: identity, horizontal flip and four 1-px shifts.
 
 ---
 
 ## 4. Empirical Evaluation and Benchmark Results
 
-### 4.1 Master Progression Leaderboard
-Table 1 outlines the complete empirical performance trajectory across all 28 iterations logged in [`results/results.json`](results/results.json).
+### 4.1 Results Ledger
+Table 1 lists the accuracy-bearing entries of [`results/results.json`](results/results.json), using the ledger's own stage IDs. "—" means the value was not logged. Precision and recall are only logged for the fusion stages.
 
-#### Table 1: Master Empirical Benchmarks on Fashion-MNIST
-| Iteration ID | Model Paradigm | Metric / Architecture Feature Space | Validation Acc (%) | Test Acc (%) | Macro Precision | Macro Recall | Macro F1 | Query Latency (s) |
-| :---: | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **E01** | Classical KNN | Raw Pixels ($D=784$, Euclidean, $k=5$) | — | 85.24% | 0.8541 | 0.8524 | 0.8510 | 1.84 s |
-| **E02** | Classical KNN | Raw Pixels ($D=784$, Manhattan $L_1$, $k=5$) | — | 85.15% | 0.8528 | 0.8515 | 0.8501 | 3.12 s |
-| **E03** | Classical KNN | Raw Pixels ($D=784$, Cosine Metric, $k=5$) | — | 85.50% | 0.8562 | 0.8550 | 0.8532 | 1.95 s |
-| **E04** | PCA-Reduced KNN | PCA $d=16$ ($k=5$, Euclidean) | 82.80% | 82.40% | 0.8260 | 0.8240 | 0.8235 | 0.08 s |
-| **E05** | PCA-Reduced KNN | PCA $d=32$ ($k=5$, Euclidean) | 85.10% | 84.75% | 0.8490 | 0.8475 | 0.8468 | 0.14 s |
-| **E06** | PCA-Reduced KNN | PCA $d=64$ ($k=5$, Euclidean) | 86.60% | 86.20% | 0.8635 | 0.8620 | 0.8612 | 0.26 s |
-| **E07** | PCA-Reduced KNN | PCA $d=128$ ($k=5$, Euclidean) | 86.40% | 85.95% | 0.8610 | 0.8595 | 0.8588 | 0.48 s |
-| **E08** | Optuna-Tuned KNN | PCA $d=64$, $k=7$, Distance Weighting | 86.85% | 86.43% | 0.8654 | 0.8643 | 0.8631 | 0.25 s |
-| **E09** | Soft-KNN (Linear Head) | $784 \to 64$ Linear Projector ($\tau=0.1$) | 87.40% | 87.10% | 0.8718 | 0.8710 | 0.8698 | 0.02 s |
-| **E10** | Soft-KNN (MLP Head) | $784 \to 256 \to 64$ Non-linear Projector | 86.20% | 85.70% | 0.8590 | 0.8570 | 0.8562 | 0.03 s |
-| **E11** | Soft-KNN (Bank Aug) | Augmented Memory Bank Anchors ($N=6000$) | 87.45% | 87.13% | 0.8722 | 0.8713 | 0.8702 | 0.04 s |
-| **E12** | Soft-KNN (Conv Backbone) | ConvNet Metric Backbone (Seed 42) | 88.10% | 87.63% | 0.8775 | 0.8763 | 0.8752 | 0.05 s |
-| **E13** | Soft-KNN (Conv Shift) | Spatial Random Translation Training | 85.10% | 84.62% | 0.8490 | 0.8462 | 0.8445 | 0.05 s |
-| **E14** | Conv Multi-Seed Ensemble | 3-Seed Averaging (Seeds 42, 7, 123) | 88.50% | 88.06% | 0.8819 | 0.8806 | 0.8795 | 0.12 s |
-| **E15** | Conv Distillation (Student) | Knowledge Distillation from 3-Seed Teacher | 89.20% | 89.03% | 0.8912 | 0.8903 | 0.8890 | 0.05 s |
-| **E16** | Convex Ensemble (E22) | 5-Model Weighted Fusion | 89.95% | 88.73% | 0.8885 | 0.8873 | 0.8860 | 0.21 s |
-| **E17** | Convex Ensemble (E24) | 7-Model Fusion (Conv + Linear + Distill) | 90.62% | 89.36% | 0.8927 | 0.8936 | 0.8923 | 0.28 s |
-| **E18** | **Grand Fusion (E25)** | **Optimal Multi-Source Convex Fusion** | **90.85%** | **89.51%** | **0.8945** | **0.8951** | **0.8936** | **0.29 s** |
+The ledger has 28 entries:
+* E18 does not exist.
+* E10 and E11 were run twice; both runs are kept. The first E10 used `softknn_aug.pt`, the second `softknn_base.pt`; the table shows the second.
+* Stages E0, E2, E4, E5, E8 and E9 are diagnostics (figures, sweeps, latency) and appear in §5.
+* The raw-pixel Manhattan and cosine baselines are not in the ledger.
+
+#### Table 1: Logged results on Fashion-MNIST (val = 6,000 validation images, test = 10,000 test images)
+| Ledger ID | Model | Configuration | Val Acc (%) | Test Acc (%) | Macro Precision | Macro Recall | Macro F1 |
+| :---: | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| E1 | Classical KNN | Raw pixels (784-D), Euclidean, $k=5$, uniform | 86.13 | 85.24 | — | — | 0.8518 |
+| E3 | Optuna-tuned KNN | PCA-64, $k=5$, Manhattan, distance weights | 87.82 | 86.43 | — | — | 0.8644 |
+| E6 | Soft-KNN, linear | 784→128 (PCA warm start), train/eval $\tau=0.5$, $k=7$ | 88.22 | 87.10 | — | — | 0.8698 |
+| E7 | Soft-KNN, linear + query aug | flip + shift + erase on training queries | 82.50 | 81.68 | — | — | 0.8151 |
+| E10 | TTA on E6 model | 6-view test-time augmentation | 87.85 | 86.74 | — | — | — |
+| E11 | E10 + KNN fusion | TTA Soft-KNN (0.9) + PCA-64 KNN (Euclidean, distance) | 87.85 | 86.30 | 0.8638 | 0.8630 | 0.8628 |
+| E12 | Inference grid on E6 model | best $k=5$, $\tau=0.1$ (no retraining) | 88.28 | 87.26 | — | — | — |
+| E13 | Soft-KNN, linear + shift aug | ±2 px shift on training queries | 85.20 | 83.66 | — | — | 0.8351 |
+| E14 | Soft-KNN, bank-augmented | bank = 54k originals + 54k shifted copies | 88.28 | 87.13 | — | — | 0.8703 |
+| E15 | Linear 3-seed ensemble + KNN fusion | seeds 42/7/123 (base config) + PCA-64 KNN | 88.35 | 86.94 | 0.8699 | 0.8694 | 0.8691 |
+| E16 | Soft-KNN, MLP | 784→256→128 | 86.92 | 85.70 | — | — | — |
+| E17 | Fusion | bank-aug (0.6) + MLP (0.2) + PCA-KNN (0.2) | 89.02 | 87.64 | 0.8762 | 0.8764 | 0.8756 |
+| E19 | Soft-KNN, conv | seed 42, 30 epochs, no augmentation | 89.07 | 87.63 | — | — | — |
+| E20 | Soft-KNN, conv + shift aug | ±2 px shift on training queries | 85.57 | 84.62 | — | — | — |
+| E21 | Conv 3-seed ensemble | seeds 42/7/123 (reused artefacts, `conv_seeds.json`) | 89.72 | 88.06 | — | — | — |
+| E22 | 6-source fusion | 3 conv seeds, bank-aug, MLP, PCA-KNN | 90.27 | 88.73 | 0.8863 | 0.8873 | 0.8858 |
+| E23 | Distilled conv student | 3-seed teacher; Kaggle artefact (`kaggle_distill.json`) | 90.10 | 89.03 | — | — | — |
+| E24 | 7-source fusion | E22 sources + distilled student | 90.62 | 89.36 | 0.8927 | 0.8936 | 0.8923 |
+| **E25** | **7-source fusion + TTA** | **non-zero weights: bank-aug 0.4, PCA-KNN 0.1, student 0.5** | **90.85** | **89.51** | **0.8945** | **0.8951** | **0.8936** |
+| E26 | Gen-2 distilled student | teacher = E24 fusion on the training set | 88.10 | 87.00 | — | — | — |
+
+E10's validation value is the TTA validation accuracy (`val_tta`); its plain (no-TTA) values are 88.22 / 87.10.
+
+**Kaggle runs.** Some runs were trained on Kaggle GPUs with `scripts/` and logged separately:
+* `results/kaggle_conv_seeds.json`: seeds 42/7/123, test 87.44 / 87.25 / 87.54 %.
+* `results/kaggle_distill.json`: the 89.03 % student reused by E23–E25.
+* `results/kaggle_distill_5teacher.json`: a 5-teacher student, 89.01 %, not used in any fusion.
 
 ---
 
 ## 5. Visual Analysis, Diagnostic Plots and Figures
 
-Every figure in this section was systematically generated during execution and is archived under [`figures/`](figures/).
+Every figure here is written by `src/experiments.py` into [`figures/`](figures/); see [`figures/README.md`](figures/README.md) for all 15.
 
 ### 5.1 Exploratory Analysis and Spectral Variance
 
 | Figure 1: Dataset Exploratory Gallery | Figure 2: PCA Cumulative Explained Variance |
 | :---: | :---: |
 | ![Dataset Samples](figures/02_samples.png) | ![PCA Variance](figures/03_pca_variance.png) |
-| **Figure 1 Legend & Analysis:** Representative 28×28 grayscale rasters across the 10 balanced categories. The dataset maintains zero class imbalance (exact 6,000 training observations per class). Visual analysis indicates substantial silhouette overlap between outerwear garments (T-shirt, Pullover, Coat, Shirt). | **Figure 2 Legend & Analysis:** Cumulative variance ratio $\eta(d)$ plotted against component count $d \in [1, 128]$. The horizontal dashed reference line marks the 85.0% threshold. At $d=64$, the model retains **85.3% of total variance**, removing high-frequency noise and improving classification accuracy. |
+| **Figure 1:** 8 sample images per class, one row per class (row labels are not rendered). The 60k development set has exactly 6,000 images per class. Upper-body garments (T-shirt, Pullover, Coat, Shirt) look alike. | **Figure 2:** Cumulative explained variance $\eta(d)$ for $d \in [1, 128]$. The dashed line marks **90 %**, reached at $d \approx 84$. At $d=64$ the curve is at **≈ 88 %** (88.1 %). |
 
 ---
 
@@ -260,84 +260,92 @@ Every figure in this section was systematically generated during execution and i
 | Figure 3: PCA Dimension vs. Classification Accuracy | Figure 4: Bias-Variance Curve Across Neighbors $K$ |
 | :---: | :---: |
 | ![PCA Sweep](figures/04_pca_sweep.png) | ![Bias Variance](figures/06_bias_variance.png) |
-| **Figure 3 Legend & Analysis:** Test accuracy plotted across PCA dimensions ($d \in [16, 128]$) for Euclidean, Manhattan, and Cosine metrics. Accuracy peaks at $d=64$ across all metrics, with lower dimensions ($d=16$) underfitting and higher dimensions ($d=128$) introducing noise. | **Figure 4 Legend & Analysis:** The empirical bias-variance trade-off on 64-D PCA features. At $K=1$, the model exhibits high variance (overfitting to noisy training instances). Peak test performance (86.43%) occurs at **$K=7$**. At $K \ge 13$, high bias dominates as decisions over-smooth. |
+| **Figure 3:** **Validation** accuracy of one KNN configuration ($k=5$, Euclidean, uniform) for $d \in \{10, 20, 32, 48, 64, 80, 96, 128\}$ plus $d = 84$ (plotted last, so the line doubles back). Best $d = 64$ (87.33 %); from 64 to 128 the curve is flat within 0.2 pt. | **Figure 4:** Train vs. validation accuracy on PCA-64 (uniform weights) for $k = 1, 3, \dots, 25$. Validation peaks at $k=7$ (87.37 %), but $k = 5, 7, 9$ differ by only 1–2 images. Train accuracy at $k=1$ is 1.0 by construction (each training point is its own nearest neighbour). |
 
 ---
 
-### 5.3 Optimization Diagnostics: Optimizers, Activations, and Temperature $\tau$
+### 5.3 Optimization Diagnostics: Optimizers and Temperature $\tau$
 
-| Figure 5: Optimizer Loss Minimization Trajectories | Figure 6: Validation Accuracy vs. Softmax Temperature $\tau$ |
+| Figure 5: Optimizer Comparison (E9) | Figure 6: Validation Accuracy vs. Training Temperature $\tau$ (E8) |
 | :---: | :---: |
 | ![Optimizer Comparison](figures/09_optimizer_compare.png) | ![Temperature Sweep](figures/10_tau_sweep.png) |
-| **Figure 5 Legend & Analysis:** Empirical loss minimization trajectories over the initial training regime. **AdamW** ($lr=10^{-3}$, decay $=10^{-4}$, blue curve) exhibits monotonic convergence. SGD with momentum (orange curve) descends slowly, while RMSprop (green curve) displays gradient oscillations. | **Figure 6 Legend & Analysis:** Validation classification accuracy across temperature scaling values $\tau \in [0.01, 1.0]$. Extremely low temperatures ($\tau < 0.05$) cause gradient vanishing due to saturation. Accuracy peaks sharply at **$\tau = 0.1$** (87.10%), while higher values ($\tau \ge 0.5$) cause uniform probability leakage. |
+| **Figure 5:** Train loss (left) and validation accuracy (right) for Adam (blue, lr 1e-3), RMSprop (orange, lr 1e-3) and SGD with momentum 0.9 (green, lr 0.1). **SGD reaches the highest validation accuracy** (best 83.85 % vs. 81.47 % Adam, 80.83 % RMSprop) within 2 epochs and early-stops after 7. | **Figure 6:** Linear Soft-KNN (with flip + shift + erase query augmentation) trained with $\tau \in \{0.1, 0.2, 0.3, 0.5, 0.7, 1.0\}$ (only these values were tested). Validation accuracy falls steadily as $\tau$ grows, from 86.53 % at $\tau = 0.1$ to 81.20 % at $\tau = 1.0$. So 0.1 is the best *tested* value and the edge of the grid. Every model was scored at inference $\tau = 0.5$, so the entropy curve is nearly flat. |
 
 ---
 
 ### 5.4 Overfitting / Underfitting Checks & Error Matrix Analysis
 
-| Figure 7: Soft-KNN Loss & Accuracy Learning Curves | Figure 8: Final Unbiased Test Set Confusion Matrix |
+| Figure 7: Soft-KNN Loss & Accuracy Learning Curves | Figure 8: Test Set Confusion Matrix (E25) |
 | :---: | :---: |
 | ![SoftKNN Curves](figures/11_softknn_curves.png) | ![Confusion Matrix](figures/12_confusion_matrix.png) |
-| **Figure 7 Legend & Analysis:** Dual-panel learning diagnostics across 10 epochs. **Top Panel:** Training loss (blue solid) vs. validation loss (orange dashed). **Bottom Panel:** Training accuracy vs. validation accuracy. The curves converge without divergence, demonstrating effective regularization. | **Figure 8 Legend & Analysis:** Comprehensive 10×10 confusion matrix on the 10,000 unseen test instances. High accuracy is achieved on Trousers (98.6%), Sandals (97.8%), and Bags (97.4%). Residual errors remain concentrated between Shirts, T-shirts, and Coats due to structural silhouette similarity. |
+| **Figure 7:** Linear Soft-KNN (E6, no augmentation) over 8 epochs. Left: train loss (no validation loss is plotted). Right: train vs. validation accuracy. The ≈ 8 pt gap (train ≈ 95–96 %, val ≈ 88 %) is mostly an artefact: each training query can match itself in the memory bank (see §2.1 C), so train accuracy is inflated and this plot cannot be read as an overfitting diagnostic. | **Figure 8:** 10×10 confusion matrix of the final E25 fusion on the 10,000 test images (89.51 %). Per-class recall: Bag 98.5 %, Trouser 97.9 %, Sandal 96.6 %. **Shirt is the worst class at 61.7 %**; 160 Shirts are predicted as T-shirt/top. Most remaining errors are among Shirt, T-shirt/top, Pullover and Coat. |
 
 ---
 
-## 6. Discussion and Ablation Studies
+## 6. Discussion
 
 ### 6.1 Impact of Distance Metric Geometry
-In raw 784-dimensional ambient pixel space:
-* Euclidean distance yields **85.24%**.
-* Manhattan ($L_1$) distance achieves **85.15%**.
-* Cosine distance achieves **85.50%** (+0.26% over Euclidean).
+* **Raw pixels.** The ledger only has the Euclidean baseline on raw 784-D pixels: **85.24 %** test (E1, $k=5$). Raw-pixel Manhattan and cosine runs are not logged in `results/results.json`.
+* **PCA-64.** In the Optuna search (E3), **Manhattan** distance with distance weighting was the best metric. It reached 87.82 % validation and 86.43 % test.
 
-Cosine distance outperforms $L_2$ because dividing by the vector $L_2$ norm eliminates global lighting intensity variations across images, isolating orientation differences.
+### 6.2 Efficiency Analysis: Inference Query Latency (ledger E5)
+Brute-force KNN computes distances from every query to all 54,000 fit images. E5 times sklearn `predict` on all **6,000 validation queries** in one call (`n_jobs` = 4, median of 3 runs for brute force):
+* **Raw 784-D, brute force:** 2.98 s.
+* **PCA 64-D, brute force:** 0.418 s, a **7.12× speed-up**.
+* kd-tree and ball-tree are slower than brute force on these dimensions (80 s / 66 s on raw pixels).
 
-### 6.2 Efficiency Analysis: Inference Query Latency
-Canonical KNN requires computing pairwise distances to all 50,000 training points:
-* **Raw 784-D Search:** Average query latency $= 1.84$ seconds per batch.
-* **PCA 64-D Search:** Average query latency $= 0.26$ seconds per batch (**7.08× acceleration**).
-* **Soft-KNN Inference:** Computing matrix products against 10 learned prototypes requires only **0.02 seconds** per batch (**92× faster than raw KNN**).
+Soft-KNN inference latency was **not measured**. Soft-KNN inference is itself a brute-force distance computation against all 54,000 bank embeddings (`torch.cdist`).
 
 ---
 
-## 7. Standalone Colab Reproduction Instructions
+## 7. Reproduction
 
-The full experimental pipeline can be reproduced cell-by-cell without local dependencies via the standalone Jupyter notebook located at [`fashion_knn_colab.ipynb`](fashion_knn_colab.ipynb).
-
-### 7.1 Running via Google Colab
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/workforakng/fashion-mnist-knn-optimization/blob/main/fashion_knn_colab.ipynb)
-
-1. Open the notebook with the **Open in Colab** badge above (it loads the notebook directly from this repository).
-2. Ensure GPU hardware acceleration is active (`Runtime > Change runtime type > T4 GPU`).
-3. Select **Run All**. The notebook will:
-   * Ingest Fashion-MNIST and build the stratified 54k/6k/10k protocol splits.
-   * Evaluate baseline classical KNN and generate PCA variance sweeps.
-   * Compare optimizers (AdamW vs. SGD vs. RMSprop) and activations (GELU vs. ReLU vs. LeakyReLU).
-   * Train the differentiable Soft-KNN model and plot live loss and accuracy diagnostic curves.
-   * Compute the final classification report (Precision, Recall, Macro F1) and render the confusion matrix.
-
-### 7.2 Running Locally via CLI
+### 7.1 Full pipeline (the source of every reported number)
 ```bash
-# 1. Environment initialization
 git clone https://github.com/workforakng/fashion-mnist-knn-optimization.git
 cd fashion-mnist-knn-optimization
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+bash setup_env.sh                 # or: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python scripts/smoke.py # pre-flight check (downloads the data, ~1 min on CPU)
 
-# 2. Pre-flight verification (3 seconds)
-python3 scripts/smoke.py
-
-# 3. Launch interactive reproduction notebook
-jupyter notebook fashion_knn_colab.ipynb
+# Classical + Soft-KNN stages (appends to results/results.json; stages already
+# in the ledger are skipped unless --force)
+.venv/bin/python -m src.experiments --scale full --stages E1,E2,E3,E4,E5,E6
+# Conv seeds and distillation (the logged runs of these used Kaggle GPUs)
+.venv/bin/python scripts/train_conv_seed.py --seed 42 --epochs 35
+.venv/bin/python scripts/train_distill.py
 ```
+Python ≥ 3.10 and PyTorch ≥ 2.3 are required. A GPU is strongly recommended from E6 onward.
+
+Known limitations of re-running:
+* `artifacts/` is not committed, so stages from E10 onward need the models to be retrained first.
+* Stages E21–E25 pick up whatever artefacts exist, so a re-run can use different sources than the logged run. See [`src/README.md`](src/README.md).
+
+### 7.2 Demo notebook (simplified; does not reproduce the reported numbers)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/workforakng/fashion-mnist-knn-optimization/blob/main/fashion_knn_colab.ipynb)
+
+[`fashion_knn_colab.ipynb`](fashion_knn_colab.ipynb) (and the identical [`fashion_knn_clean_pipeline.ipynb`](fashion_knn_clean_pipeline.ipynb) without the Colab badge) is a short, self-contained teaching demo.
+
+**What it runs:**
+* The same stratified 54k / 6k / 10k split as `src/`.
+* Classical KNN on a 10,000-image subset; the distance metric, PCA dimension and $k$ are chosen on **validation**, then reported once on test.
+* A short optimizer comparison.
+* A small CNN with **learnable class prototypes**, trained with AdamW, with the best epoch chosen on validation.
+* A classification report and confusion matrix.
+
+**What it does not run:** the memory-bank Soft-KNN, the seed ensemble, distillation, TTA or fusion. Its test accuracy is not the 89.51 % of E25.
 
 ---
 
 ## 8. Conclusion
 
-This research demonstrates that the classical non-parametric K-Nearest Neighbors algorithm can be systematically transformed into a competitive modern vision classifier. By addressing distance concentration through spectral projection (PCA), preserving topological locality with convolutional heads, replacing discrete voting with a differentiable temperature-scaled formulation (**Soft-KNN**), and applying multi-teacher distillation, test accuracy improves from a baseline of **85.24%** to **89.51%** (and **90.85%** validation accuracy). This study bridges foundational non-parametric learning theory and modern gradient-based deep metric optimization.
+Starting from raw-pixel KNN (**85.24 %** test), the following steps raise test accuracy to **89.51 %** (E25; 90.85 % on the validation split that was also used to choose the fusion weights):
+* PCA;
+* a learned Soft-KNN metric over a memory bank of training embeddings;
+* a convolutional embedding;
+* distillation of a 3-seed ensemble;
+* a validation-weighted fusion with test-time augmentation.
+
+Single-run differences below about 0.5 pt on the 10,000-image test set are within run-to-run noise (the conv seeds alone span 0.65 pt).
 
 ---
 

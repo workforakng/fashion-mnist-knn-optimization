@@ -1,24 +1,41 @@
 #!/usr/bin/env bash
 # One-shot environment setup for the Fashion-MNIST KNN project.
-# Creates .venv (Python 3.14) and installs torch (CUDA with CPU fallback) + analysis stack.
-set -u
-cd /home/akng/Downloads/Fashion
+# Creates .venv next to this script (Python >= 3.10) and installs torch
+# (CUDA wheel if available, CPU fallback) plus everything in requirements.txt.
+#
+# Usage:  bash setup_env.sh            (uses python3)
+#         PYTHON=python3.12 bash setup_env.sh
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
-echo "[setup] creating venv"
-python3.14 -m venv .venv
+PYTHON="${PYTHON:-python3}"
+if ! "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+  echo "[setup] ERROR: $PYTHON is $("$PYTHON" -V 2>&1); Python >= 3.10 is required." >&2
+  echo "[setup] Set PYTHON=/path/to/python3.10+ and re-run." >&2
+  exit 1
+fi
+
+echo "[setup] creating venv with $("$PYTHON" -V 2>&1)"
+"$PYTHON" -m venv .venv
 .venv/bin/pip install -q -U pip wheel setuptools
 
-echo "[setup] installing torch (trying cu130 -> cu128 -> cpu)"
-for IDX in cu130 cu128 cpu; do
-  if .venv/bin/pip install torch --index-url "https://download.pytorch.org/whl/$IDX"; then
+echo "[setup] installing torch (trying cu128 -> cu126 -> cpu wheel indexes)"
+TORCH_OK=0
+for IDX in cu128 cu126 cpu; do
+  if .venv/bin/pip install "torch>=2.3" "torchvision>=0.18" \
+      --index-url "https://download.pytorch.org/whl/$IDX"; then
     echo "TORCH_INDEX_OK $IDX"
+    TORCH_OK=1
     break
   fi
   echo "TORCH_INDEX_FAIL $IDX"
 done
+if [ "$TORCH_OK" -ne 1 ]; then
+  echo "[setup] falling back to the default PyPI torch wheel"
+fi
 
-echo "[setup] installing analysis stack"
-.venv/bin/pip install numpy scikit-learn matplotlib pandas optuna joblib tqdm nbformat nbclient ipykernel
+echo "[setup] installing requirements.txt"
+.venv/bin/pip install -r requirements.txt
 
 echo "[setup] verifying"
 .venv/bin/python - <<'EOF'
