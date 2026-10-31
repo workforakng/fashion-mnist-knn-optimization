@@ -243,7 +243,7 @@ def fig_bias_variance(ledger):
     ax.set_xlim(0, 26)
     ax.set_ylim(84, 100.5)
     ax.set_yticks([85, 90, 95, 100])
-    ax.set_xlabel("Number of neighbours k")
+    ax.set_xlabel("Number of neighbors k")
     ax.set_ylabel("Accuracy (%)")
     ax.legend(loc="upper right", handlelength=1.8)
     mark_truncated_y(ax)
