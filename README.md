@@ -1,16 +1,15 @@
 # Systematic Optimization and Metric Learning for K-Nearest Neighbors Classification on Fashion-MNIST
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/workforakng/fashion-mnist-knn-optimization/blob/main/fashion_knn_colab.ipynb)
-[![Kaggle Kernel](https://img.shields.io/badge/Kaggle-Notebook-20BEFF?logo=kaggle&logoColor=white)](https://www.kaggle.com/code/aksharnathgorain/fashion-knn-clean-pipeline)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org)
-[![Accuracy](https://img.shields.io/badge/Test%20Accuracy-91.06%25-brightgreen.svg)](#4-empirical-evaluation-and-benchmark-results)
+[![Accuracy](https://img.shields.io/badge/Test%20Accuracy-89.51%25-brightgreen.svg)](#4-empirical-evaluation-and-benchmark-results)
 
 **Authors:** Akshar Nath Gorain et al.  
 **Affiliation:** Department of Computer Science & Machine Learning Research Group  
 **Target Venue:** Machine Learning & Pattern Recognition Coursework  
-**Repository & Codebase:** [GitHub Repository / Standalone Reproduction Notebook](fashion_knn_clean_pipeline.ipynb)  
-**Execution Environment:** Ubuntu 24.04 LTS, PyTorch 2.4, NVIDIA RTX GPU / Kaggle Cloud T4 Accelerator  
+**Repository & Codebase:** [GitHub Repository / Standalone Reproduction Notebook](fashion_knn_colab.ipynb)  
+**Execution Environment:** Ubuntu 24.04 LTS, PyTorch 2.4, NVIDIA RTX GPU / Google Colab T4 Accelerator  
 
 ---
 
@@ -301,19 +300,18 @@ Canonical KNN requires computing pairwise distances to all 50,000 training point
 
 ---
 
-## 7. Standalone Colab/Kaggle Reproduction Instructions
+## 7. Standalone Colab Reproduction Instructions
 
-The full experimental pipeline can be reproduced cell-by-cell without local dependencies via the standalone Jupyter notebook located at [`fashion_knn_clean_pipeline.ipynb`](fashion_knn_clean_pipeline.ipynb).
+The full experimental pipeline can be reproduced cell-by-cell without local dependencies via the standalone Jupyter notebook located at [`fashion_knn_colab.ipynb`](fashion_knn_colab.ipynb).
 
-### 7.1 Running via Google Colab / Kaggle
+### 7.1 Running via Google Colab
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/workforakng/fashion-mnist-knn-optimization/blob/main/fashion_knn_colab.ipynb)
 
-### 7.1 Running via Google Colab / Kaggle
-1. Upload [`fashion_knn_clean_pipeline.ipynb`](fashion_knn_clean_pipeline.ipynb) to Google Colab or Kaggle Notebooks.
+1. Open the notebook with the **Open in Colab** badge above (it loads the notebook directly from this repository).
 2. Ensure GPU hardware acceleration is active (`Runtime > Change runtime type > T4 GPU`).
 3. Select **Run All**. The notebook will:
-   * Download Fashion-MNIST via `torchvision.datasets`.
+   * Ingest Fashion-MNIST and build the stratified 54k/6k/10k protocol splits.
    * Evaluate baseline classical KNN and generate PCA variance sweeps.
    * Compare optimizers (AdamW vs. SGD vs. RMSprop) and activations (GELU vs. ReLU vs. LeakyReLU).
    * Train the differentiable Soft-KNN model and plot live loss and accuracy diagnostic curves.
@@ -322,8 +320,8 @@ The full experimental pipeline can be reproduced cell-by-cell without local depe
 ### 7.2 Running Locally via CLI
 ```bash
 # 1. Environment initialization
-git clone https://github.com/your-username/fashion-mnist-knn.git
-cd fashion-mnist-knn
+git clone https://github.com/workforakng/fashion-mnist-knn-optimization.git
+cd fashion-mnist-knn-optimization
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -332,7 +330,7 @@ pip install -r requirements.txt
 python3 scripts/smoke.py
 
 # 3. Launch interactive reproduction notebook
-jupyter notebook fashion_knn_clean_pipeline.ipynb
+jupyter notebook fashion_knn_colab.ipynb
 ```
 
 ---

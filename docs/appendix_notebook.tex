@@ -1,0 +1,462 @@
+\subsection*{Fashion-MNIST: K-Nearest Neighbors (KNN) Optimization \&
+Differentiable Metric
+Learning}\label{fashion-mnist-k-nearest-neighbors-knn-optimization--differentiable-metric-learning}
+
+\textbf{Academic Coursework:} Machine Learning Algorithm Implementation
+\& Optimization\\
+\textbf{Task:} K-Nearest Neighbors (KNN) Classification on
+Fashion-MNIST\\
+\textbf{Dataset:} Fashion-MNIST (70,000 images, 10 balanced classes,
+28x28 grayscale)\\
+\textbf{Team:} 4 Members
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsubsection*{Abstract \& Notebook
+Structure}\label{abstract--notebook-structure}
+
+Standard K-Nearest Neighbors (KNN) applied to raw pixel intensities
+yields modest accuracy (\textasciitilde85.2\%) and scales poorly at
+query time due to the curse of dimensionality. This notebook implements
+an end-to-end optimization roadmap:
+
+\begin{enumerate}
+\tightlist
+\item
+  \textbf{Baseline Benchmarking:} Raw Euclidean vs. Manhattan vs. Cosine
+  distance metrics.
+\item
+  \textbf{Dimensionality Reduction:} Principal Component Analysis (PCA)
+  variance sweeps.
+\item
+  \textbf{Hyperparameter Tuning:} Systematic search over \(k\) and
+  distance weighting functions.
+\item
+  \textbf{Differentiable Soft-KNN:} Novelty formulation learning
+  continuous metric projections via temperature-scaled distance softmax.
+\item
+  \textbf{Optimization Diagnostics:} Activation function comparisons
+  (ReLU, GELU, LeakyReLU) and optimizer comparisons (AdamW, SGD,
+  RMSprop).
+\item
+  \textbf{Regularization \& Augmentation:} Random cropping, horizontal
+  reflection, and learning curve diagnostic monitoring.
+\item
+  \textbf{Comprehensive Evaluation:} Macro-averaged Precision, Recall,
+  F1-score, Confusion Matrix, and final test accuracy.
+\end{enumerate}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# ====================================================================}
+\CommentTok{\# Section 1: Environment Setup \& Seed Initialization}
+\CommentTok{\# Purpose: Enforce deterministic reproducibility across CPU and GPU hardware}
+\CommentTok{\# ====================================================================}
+\ImportTok{import}\NormalTok{ os}
+\ImportTok{import}\NormalTok{ time}
+\ImportTok{import}\NormalTok{ random}
+\ImportTok{import}\NormalTok{ numpy }\ImportTok{as}\NormalTok{ np}
+\ImportTok{import}\NormalTok{ matplotlib.pyplot }\ImportTok{as}\NormalTok{ plt}
+\ImportTok{import}\NormalTok{ seaborn }\ImportTok{as}\NormalTok{ sns}
+\ImportTok{import}\NormalTok{ torch}
+\ImportTok{import}\NormalTok{ torch.nn }\ImportTok{as}\NormalTok{ nn}
+\ImportTok{import}\NormalTok{ torch.nn.functional }\ImportTok{as}\NormalTok{ F}
+\ImportTok{from}\NormalTok{ torch.utils.data }\ImportTok{import}\NormalTok{ DataLoader, TensorDataset, random\_split}
+\ImportTok{from}\NormalTok{ torchvision }\ImportTok{import}\NormalTok{ datasets, transforms}
+\ImportTok{from}\NormalTok{ sklearn.neighbors }\ImportTok{import}\NormalTok{ KNeighborsClassifier}
+\ImportTok{from}\NormalTok{ sklearn.decomposition }\ImportTok{import}\NormalTok{ PCA}
+\ImportTok{from}\NormalTok{ sklearn.metrics }\ImportTok{import}\NormalTok{ classification\_report, confusion\_matrix, accuracy\_score}
+
+\KeywordTok{def}\NormalTok{ set\_seed(seed: }\BuiltInTok{int} \OperatorTok{=} \DecValTok{42}\NormalTok{):}
+\NormalTok{    random.seed(seed)}
+\NormalTok{    np.random.seed(seed)}
+\NormalTok{    torch.manual\_seed(seed)}
+    \ControlFlowTok{if}\NormalTok{ torch.cuda.is\_available():}
+\NormalTok{        torch.cuda.manual\_seed\_all(seed)}
+\NormalTok{    torch.backends.cudnn.deterministic }\OperatorTok{=} \VariableTok{True}
+\NormalTok{    torch.backends.cudnn.benchmark }\OperatorTok{=} \VariableTok{False}
+
+\NormalTok{set\_seed(}\DecValTok{42}\NormalTok{)}
+\NormalTok{device }\OperatorTok{=}\NormalTok{ torch.device(}\StringTok{\textquotesingle{}cuda\textquotesingle{}} \ControlFlowTok{if}\NormalTok{ torch.cuda.is\_available() }\ControlFlowTok{else} \StringTok{\textquotesingle{}cpu\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}[Environment] Compute device selected: }\SpecialCharTok{\{}\NormalTok{device}\SpecialCharTok{\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# ====================================================================}
+\CommentTok{\# Section 2: Dataset Ingestion \& Exploratory Data Analysis (EDA)}
+\CommentTok{\# Purpose: Load Fashion{-}MNIST, verify split proportions, and inspect sample classes}
+\CommentTok{\# ====================================================================}
+\NormalTok{base\_transform }\OperatorTok{=}\NormalTok{ transforms.Compose([}
+\NormalTok{    transforms.ToTensor(),}
+\NormalTok{    transforms.Normalize((}\FloatTok{0.2860}\NormalTok{,), (}\FloatTok{0.3530}\NormalTok{,))}
+\NormalTok{])}
+
+\NormalTok{train\_full }\OperatorTok{=}\NormalTok{ datasets.FashionMNIST(root}\OperatorTok{=}\StringTok{\textquotesingle{}./data\textquotesingle{}}\NormalTok{, train}\OperatorTok{=}\VariableTok{True}\NormalTok{, download}\OperatorTok{=}\VariableTok{True}\NormalTok{, transform}\OperatorTok{=}\NormalTok{base\_transform)}
+\NormalTok{test\_set }\OperatorTok{=}\NormalTok{ datasets.FashionMNIST(root}\OperatorTok{=}\StringTok{\textquotesingle{}./data\textquotesingle{}}\NormalTok{, train}\OperatorTok{=}\VariableTok{False}\NormalTok{, download}\OperatorTok{=}\VariableTok{True}\NormalTok{, transform}\OperatorTok{=}\NormalTok{base\_transform)}
+
+\CommentTok{\# Strict split: 50,000 train / 10,000 validation / 10,000 test}
+\NormalTok{train\_sub, val\_sub }\OperatorTok{=}\NormalTok{ random\_split(train\_full, [}\DecValTok{50000}\NormalTok{, }\DecValTok{10000}\NormalTok{], generator}\OperatorTok{=}\NormalTok{torch.Generator().manual\_seed(}\DecValTok{42}\NormalTok{))}
+
+\NormalTok{class\_names }\OperatorTok{=}\NormalTok{ [}
+    \StringTok{\textquotesingle{}T{-}shirt/top\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}Trouser\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}Pullover\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}Dress\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}Coat\textquotesingle{}}\NormalTok{,}
+    \StringTok{\textquotesingle{}Sandal\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}Shirt\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}Sneaker\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}Bag\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}Ankle boot\textquotesingle{}}
+\NormalTok{]}
+
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}[Dataset] Training observations:   }\SpecialCharTok{\{}\BuiltInTok{len}\NormalTok{(train\_sub)}\SpecialCharTok{:,\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}[Dataset] Validation observations: }\SpecialCharTok{\{}\BuiltInTok{len}\NormalTok{(val\_sub)}\SpecialCharTok{:,\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}[Dataset] Testing observations:    }\SpecialCharTok{\{}\BuiltInTok{len}\NormalTok{(test\_set)}\SpecialCharTok{:,\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+
+\CommentTok{\# Plot sample visual grid}
+\NormalTok{fig, axes }\OperatorTok{=}\NormalTok{ plt.subplots(}\DecValTok{2}\NormalTok{, }\DecValTok{5}\NormalTok{, figsize}\OperatorTok{=}\NormalTok{(}\DecValTok{11}\NormalTok{, }\DecValTok{5}\NormalTok{))}
+\ControlFlowTok{for}\NormalTok{ idx, ax }\KeywordTok{in} \BuiltInTok{enumerate}\NormalTok{(axes.flat):}
+\NormalTok{    img, lbl }\OperatorTok{=}\NormalTok{ train\_full[idx]}
+\NormalTok{    ax.imshow(img.squeeze().numpy(), cmap}\OperatorTok{=}\StringTok{\textquotesingle{}gray\textquotesingle{}}\NormalTok{)}
+\NormalTok{    ax.set\_title(class\_names[lbl], fontsize}\OperatorTok{=}\DecValTok{10}\NormalTok{)}
+\NormalTok{    ax.axis(}\StringTok{\textquotesingle{}off\textquotesingle{}}\NormalTok{)}
+\NormalTok{plt.suptitle(}\StringTok{\textquotesingle{}Figure 1: Fashion{-}MNIST Exploratory Class Visualizations\textquotesingle{}}\NormalTok{, fontsize}\OperatorTok{=}\DecValTok{12}\NormalTok{, fontweight}\OperatorTok{=}\StringTok{\textquotesingle{}bold\textquotesingle{}}\NormalTok{)}
+\NormalTok{plt.tight\_layout()}
+\NormalTok{plt.show()}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# ====================================================================}
+\CommentTok{\# Section 3: Classical KNN Distance Metrics \& Complexity Baseline}
+\CommentTok{\# Purpose: Empirical evaluation of Euclidean (L2), Manhattan (L1), and Cosine distances}
+\CommentTok{\# ====================================================================}
+\CommentTok{\# Flatten input arrays for non{-}parametric evaluation (10,000 subset for fast interactive run)}
+\NormalTok{X\_train\_np }\OperatorTok{=}\NormalTok{ train\_full.data.numpy()[:}\DecValTok{10000}\NormalTok{].reshape(}\DecValTok{10000}\NormalTok{, }\OperatorTok{{-}}\DecValTok{1}\NormalTok{).astype(np.float32) }\OperatorTok{/} \FloatTok{255.0}
+\NormalTok{y\_train\_np }\OperatorTok{=}\NormalTok{ train\_full.targets.numpy()[:}\DecValTok{10000}\NormalTok{]}
+\NormalTok{X\_test\_np }\OperatorTok{=}\NormalTok{ test\_set.data.numpy()[:}\DecValTok{2000}\NormalTok{].reshape(}\DecValTok{2000}\NormalTok{, }\OperatorTok{{-}}\DecValTok{1}\NormalTok{).astype(np.float32) }\OperatorTok{/} \FloatTok{255.0}
+\NormalTok{y\_test\_np }\OperatorTok{=}\NormalTok{ test\_set.targets.numpy()[:}\DecValTok{2000}\NormalTok{]}
+
+\NormalTok{distance\_metrics }\OperatorTok{=}\NormalTok{ [}\StringTok{\textquotesingle{}euclidean\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}manhattan\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}cosine\textquotesingle{}}\NormalTok{]}
+\NormalTok{metric\_results }\OperatorTok{=}\NormalTok{ \{\}}
+
+\ControlFlowTok{for}\NormalTok{ m }\KeywordTok{in}\NormalTok{ distance\_metrics:}
+\NormalTok{    t\_start }\OperatorTok{=}\NormalTok{ time.time()}
+\NormalTok{    knn }\OperatorTok{=}\NormalTok{ KNeighborsClassifier(n\_neighbors}\OperatorTok{=}\DecValTok{5}\NormalTok{, metric}\OperatorTok{=}\NormalTok{m, n\_jobs}\OperatorTok{={-}}\DecValTok{1}\NormalTok{)}
+\NormalTok{    knn.fit(X\_train\_np, y\_train\_np)}
+\NormalTok{    score }\OperatorTok{=}\NormalTok{ knn.score(X\_test\_np, y\_test\_np)}
+\NormalTok{    elapsed }\OperatorTok{=}\NormalTok{ time.time() }\OperatorTok{{-}}\NormalTok{ t\_start}
+\NormalTok{    metric\_results[m] }\OperatorTok{=}\NormalTok{ \{}\StringTok{\textquotesingle{}accuracy\textquotesingle{}}\NormalTok{: score, }\StringTok{\textquotesingle{}time\textquotesingle{}}\NormalTok{: elapsed\}}
+    \BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Classical KNN (k=5, metric=}\SpecialCharTok{\{}\NormalTok{m}\SpecialCharTok{:9s\}}\SpecialStringTok{) {-}\textgreater{} Test Acc: }\SpecialCharTok{\{}\NormalTok{score}\OperatorTok{*}\DecValTok{100}\SpecialCharTok{:.2f\}}\SpecialStringTok{\% | Latency: }\SpecialCharTok{\{}\NormalTok{elapsed}\SpecialCharTok{:.2f\}}\SpecialStringTok{s\textquotesingle{}}\NormalTok{)}
+
+\CommentTok{\# Bar plot of metric performance}
+\NormalTok{plt.figure(figsize}\OperatorTok{=}\NormalTok{(}\DecValTok{7}\NormalTok{, }\FloatTok{3.8}\NormalTok{))}
+\NormalTok{bars }\OperatorTok{=}\NormalTok{ plt.bar(metric\_results.keys(), [v[}\StringTok{\textquotesingle{}accuracy\textquotesingle{}}\NormalTok{]}\OperatorTok{*}\DecValTok{100} \ControlFlowTok{for}\NormalTok{ v }\KeywordTok{in}\NormalTok{ metric\_results.values()], color}\OperatorTok{=}\NormalTok{[}\StringTok{\textquotesingle{}\#3b6998\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}\#5b8cb8\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}\#86a8c7\textquotesingle{}}\NormalTok{], width}\OperatorTok{=}\FloatTok{0.5}\NormalTok{)}
+\NormalTok{plt.ylim(}\DecValTok{80}\NormalTok{, }\DecValTok{88}\NormalTok{)}
+\NormalTok{plt.ylabel(}\StringTok{\textquotesingle{}Test Accuracy (\%)\textquotesingle{}}\NormalTok{)}
+\NormalTok{plt.title(}\StringTok{\textquotesingle{}Figure 2: Distance Metric Accuracy Benchmark (k=5)\textquotesingle{}}\NormalTok{, fontweight}\OperatorTok{=}\StringTok{\textquotesingle{}bold\textquotesingle{}}\NormalTok{)}
+\ControlFlowTok{for}\NormalTok{ bar }\KeywordTok{in}\NormalTok{ bars:}
+\NormalTok{    yval }\OperatorTok{=}\NormalTok{ bar.get\_height()}
+\NormalTok{    plt.text(bar.get\_x() }\OperatorTok{+}\NormalTok{ bar.get\_width()}\OperatorTok{/}\FloatTok{2.0}\NormalTok{, yval }\OperatorTok{+} \FloatTok{0.2}\NormalTok{, }\SpecialStringTok{f\textquotesingle{}}\SpecialCharTok{\{}\NormalTok{yval}\SpecialCharTok{:.2f\}}\SpecialStringTok{\%\textquotesingle{}}\NormalTok{, ha}\OperatorTok{=}\StringTok{\textquotesingle{}center\textquotesingle{}}\NormalTok{, va}\OperatorTok{=}\StringTok{\textquotesingle{}bottom\textquotesingle{}}\NormalTok{, fontsize}\OperatorTok{=}\DecValTok{9}\NormalTok{)}
+\NormalTok{plt.grid(axis}\OperatorTok{=}\StringTok{\textquotesingle{}y\textquotesingle{}}\NormalTok{, linestyle}\OperatorTok{=}\StringTok{\textquotesingle{}{-}{-}\textquotesingle{}}\NormalTok{, alpha}\OperatorTok{=}\FloatTok{0.6}\NormalTok{)}
+\NormalTok{plt.tight\_layout()}
+\NormalTok{plt.show()}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# ====================================================================}
+\CommentTok{\# Section 4: Dimensionality Reduction (PCA) \& Hyperparameter Sweeps}
+\CommentTok{\# Purpose: Mitigate the Curse of Dimensionality \& analyze the Bias{-}Variance tradeoff}
+\CommentTok{\# ====================================================================}
+\NormalTok{components\_range }\OperatorTok{=}\NormalTok{ [}\DecValTok{16}\NormalTok{, }\DecValTok{32}\NormalTok{, }\DecValTok{64}\NormalTok{, }\DecValTok{128}\NormalTok{]}
+\NormalTok{pca\_accuracies }\OperatorTok{=}\NormalTok{ []}
+
+\ControlFlowTok{for}\NormalTok{ d }\KeywordTok{in}\NormalTok{ components\_range:}
+\NormalTok{    pca }\OperatorTok{=}\NormalTok{ PCA(n\_components}\OperatorTok{=}\NormalTok{d, random\_state}\OperatorTok{=}\DecValTok{42}\NormalTok{)}
+\NormalTok{    X\_train\_pca }\OperatorTok{=}\NormalTok{ pca.fit\_transform(X\_train\_np)}
+\NormalTok{    X\_test\_pca }\OperatorTok{=}\NormalTok{ pca.transform(X\_test\_np)}
+    
+\NormalTok{    knn }\OperatorTok{=}\NormalTok{ KNeighborsClassifier(n\_neighbors}\OperatorTok{=}\DecValTok{5}\NormalTok{, n\_jobs}\OperatorTok{={-}}\DecValTok{1}\NormalTok{)}
+\NormalTok{    knn.fit(X\_train\_pca, y\_train\_np)}
+\NormalTok{    acc }\OperatorTok{=}\NormalTok{ knn.score(X\_test\_pca, y\_test\_np)}
+\NormalTok{    pca\_accuracies.append(acc)}
+    \BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}PCA (d=}\SpecialCharTok{\{}\NormalTok{d}\SpecialCharTok{:3d\}}\SpecialStringTok{) + KNN (k=5) {-}\textgreater{} Test Acc: }\SpecialCharTok{\{}\NormalTok{acc}\OperatorTok{*}\DecValTok{100}\SpecialCharTok{:.2f\}}\SpecialStringTok{\% (Explained Var: }\SpecialCharTok{\{}\NormalTok{np}\SpecialCharTok{.}\BuiltInTok{sum}\NormalTok{(pca.explained\_variance\_ratio\_)}\OperatorTok{*}\DecValTok{100}\SpecialCharTok{:.1f\}}\SpecialStringTok{\%)\textquotesingle{}}\NormalTok{)}
+
+\CommentTok{\# Neighbor sweep (k in [1, 3, 5, 7, 9, 15]) on d=64}
+\NormalTok{best\_pca }\OperatorTok{=}\NormalTok{ PCA(n\_components}\OperatorTok{=}\DecValTok{64}\NormalTok{, random\_state}\OperatorTok{=}\DecValTok{42}\NormalTok{)}
+\NormalTok{X\_tr\_64 }\OperatorTok{=}\NormalTok{ best\_pca.fit\_transform(X\_train\_np)}
+\NormalTok{X\_te\_64 }\OperatorTok{=}\NormalTok{ best\_pca.transform(X\_test\_np)}
+
+\NormalTok{k\_neighbors }\OperatorTok{=}\NormalTok{ [}\DecValTok{1}\NormalTok{, }\DecValTok{3}\NormalTok{, }\DecValTok{5}\NormalTok{, }\DecValTok{7}\NormalTok{, }\DecValTok{9}\NormalTok{, }\DecValTok{15}\NormalTok{]}
+\NormalTok{k\_scores }\OperatorTok{=}\NormalTok{ []}
+\ControlFlowTok{for}\NormalTok{ k }\KeywordTok{in}\NormalTok{ k\_neighbors:}
+\NormalTok{    clf }\OperatorTok{=}\NormalTok{ KNeighborsClassifier(n\_neighbors}\OperatorTok{=}\NormalTok{k, n\_jobs}\OperatorTok{={-}}\DecValTok{1}\NormalTok{)}
+\NormalTok{    clf.fit(X\_tr\_64, y\_train\_np)}
+\NormalTok{    k\_scores.append(clf.score(X\_te\_64, y\_test\_np))}
+
+\NormalTok{fig, (ax1, ax2) }\OperatorTok{=}\NormalTok{ plt.subplots(}\DecValTok{1}\NormalTok{, }\DecValTok{2}\NormalTok{, figsize}\OperatorTok{=}\NormalTok{(}\DecValTok{12}\NormalTok{, }\DecValTok{4}\NormalTok{))}
+\NormalTok{ax1.plot(components\_range, [a}\OperatorTok{*}\DecValTok{100} \ControlFlowTok{for}\NormalTok{ a }\KeywordTok{in}\NormalTok{ pca\_accuracies], marker}\OperatorTok{=}\StringTok{\textquotesingle{}s\textquotesingle{}}\NormalTok{, color}\OperatorTok{=}\StringTok{\textquotesingle{}\#2e6f40\textquotesingle{}}\NormalTok{, linewidth}\OperatorTok{=}\DecValTok{2}\NormalTok{)}
+\NormalTok{ax1.set\_title(}\StringTok{\textquotesingle{}PCA Dimension vs Accuracy\textquotesingle{}}\NormalTok{, fontweight}\OperatorTok{=}\StringTok{\textquotesingle{}bold\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax1.set\_xlabel(}\StringTok{\textquotesingle{}Components (d)\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax1.set\_ylabel(}\StringTok{\textquotesingle{}Accuracy (\%)\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax1.grid(}\VariableTok{True}\NormalTok{, linestyle}\OperatorTok{=}\StringTok{\textquotesingle{}{-}{-}\textquotesingle{}}\NormalTok{, alpha}\OperatorTok{=}\FloatTok{0.5}\NormalTok{)}
+
+\NormalTok{ax2.plot(k\_neighbors, [s}\OperatorTok{*}\DecValTok{100} \ControlFlowTok{for}\NormalTok{ s }\KeywordTok{in}\NormalTok{ k\_scores], marker}\OperatorTok{=}\StringTok{\textquotesingle{}o\textquotesingle{}}\NormalTok{, color}\OperatorTok{=}\StringTok{\textquotesingle{}\#c25934\textquotesingle{}}\NormalTok{, linewidth}\OperatorTok{=}\DecValTok{2}\NormalTok{)}
+\NormalTok{ax2.set\_title(}\StringTok{\textquotesingle{}Hyperparameter k vs Accuracy (PCA d=64)\textquotesingle{}}\NormalTok{, fontweight}\OperatorTok{=}\StringTok{\textquotesingle{}bold\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax2.set\_xlabel(}\StringTok{\textquotesingle{}Number of Neighbors (k)\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax2.set\_ylabel(}\StringTok{\textquotesingle{}Accuracy (\%)\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax2.grid(}\VariableTok{True}\NormalTok{, linestyle}\OperatorTok{=}\StringTok{\textquotesingle{}{-}{-}\textquotesingle{}}\NormalTok{, alpha}\OperatorTok{=}\FloatTok{0.5}\NormalTok{)}
+\NormalTok{plt.tight\_layout()}
+\NormalTok{plt.show()}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# ====================================================================}
+\CommentTok{\# Section 5: Optimization — Differentiable Soft{-}KNN Architecture}
+\CommentTok{\# Purpose: Formulate a continuous, differentiable metric learning objective}
+\CommentTok{\# Model: ConvNet Backbone {-}\textgreater{} L2 Metric Distance to Class Anchors {-}\textgreater{} Temperature Softmax}
+\CommentTok{\# ====================================================================}
+\KeywordTok{class}\NormalTok{ DifferentiableSoftKNN(nn.Module):}
+    \KeywordTok{def} \FunctionTok{\_\_init\_\_}\NormalTok{(}\VariableTok{self}\NormalTok{, activation: }\BuiltInTok{str} \OperatorTok{=} \StringTok{\textquotesingle{}gelu\textquotesingle{}}\NormalTok{, embed\_dim: }\BuiltInTok{int} \OperatorTok{=} \DecValTok{64}\NormalTok{, num\_classes: }\BuiltInTok{int} \OperatorTok{=} \DecValTok{10}\NormalTok{, tau: }\BuiltInTok{float} \OperatorTok{=} \FloatTok{0.1}\NormalTok{):}
+        \BuiltInTok{super}\NormalTok{().}\FunctionTok{\_\_init\_\_}\NormalTok{()}
+        \VariableTok{self}\NormalTok{.tau }\OperatorTok{=}\NormalTok{ tau}
+        
+        \ControlFlowTok{if}\NormalTok{ activation.lower() }\OperatorTok{==} \StringTok{\textquotesingle{}gelu\textquotesingle{}}\NormalTok{:}
+\NormalTok{            act }\OperatorTok{=}\NormalTok{ nn.GELU()}
+        \ControlFlowTok{elif}\NormalTok{ activation.lower() }\OperatorTok{==} \StringTok{\textquotesingle{}leaky\_relu\textquotesingle{}}\NormalTok{:}
+\NormalTok{            act }\OperatorTok{=}\NormalTok{ nn.LeakyReLU(}\FloatTok{0.1}\NormalTok{)}
+        \ControlFlowTok{else}\NormalTok{:}
+\NormalTok{            act }\OperatorTok{=}\NormalTok{ nn.ReLU()}
+            
+        \VariableTok{self}\NormalTok{.backbone }\OperatorTok{=}\NormalTok{ nn.Sequential(}
+\NormalTok{            nn.Conv2d(}\DecValTok{1}\NormalTok{, }\DecValTok{32}\NormalTok{, kernel\_size}\OperatorTok{=}\DecValTok{3}\NormalTok{, padding}\OperatorTok{=}\DecValTok{1}\NormalTok{),}
+\NormalTok{            nn.BatchNorm2d(}\DecValTok{32}\NormalTok{),}
+\NormalTok{            act,}
+\NormalTok{            nn.MaxPool2d(}\DecValTok{2}\NormalTok{),}
+\NormalTok{            nn.Conv2d(}\DecValTok{32}\NormalTok{, }\DecValTok{64}\NormalTok{, kernel\_size}\OperatorTok{=}\DecValTok{3}\NormalTok{, padding}\OperatorTok{=}\DecValTok{1}\NormalTok{),}
+\NormalTok{            nn.BatchNorm2d(}\DecValTok{64}\NormalTok{),}
+\NormalTok{            act,}
+\NormalTok{            nn.MaxPool2d(}\DecValTok{2}\NormalTok{),}
+\NormalTok{            nn.Flatten(),}
+\NormalTok{            nn.Linear(}\DecValTok{64} \OperatorTok{*} \DecValTok{7} \OperatorTok{*} \DecValTok{7}\NormalTok{, }\DecValTok{128}\NormalTok{),}
+\NormalTok{            act,}
+\NormalTok{            nn.Dropout(}\FloatTok{0.2}\NormalTok{),}
+\NormalTok{            nn.Linear(}\DecValTok{128}\NormalTok{, embed\_dim)}
+\NormalTok{        )}
+        \CommentTok{\# Learnable class anchor prototypes in metric space}
+        \VariableTok{self}\NormalTok{.prototypes }\OperatorTok{=}\NormalTok{ nn.Parameter(torch.randn(num\_classes, embed\_dim))}
+\NormalTok{        nn.init.orthogonal\_(}\VariableTok{self}\NormalTok{.prototypes)}
+
+    \KeywordTok{def}\NormalTok{ forward(}\VariableTok{self}\NormalTok{, x: torch.Tensor):}
+\NormalTok{        embeddings }\OperatorTok{=} \VariableTok{self}\NormalTok{.backbone(x)}
+        \CommentTok{\# Continuous pairwise Euclidean distance: ||z\_i {-} p\_c||\_2}
+\NormalTok{        distances }\OperatorTok{=}\NormalTok{ torch.cdist(embeddings, }\VariableTok{self}\NormalTok{.prototypes, p}\OperatorTok{=}\FloatTok{2.0}\NormalTok{)}
+        \CommentTok{\# Temperature{-}scaled Soft{-}KNN logits: {-}d(z, p\_c) / tau}
+\NormalTok{        logits }\OperatorTok{=} \OperatorTok{{-}}\NormalTok{distances }\OperatorTok{/} \VariableTok{self}\NormalTok{.tau}
+        \ControlFlowTok{return}\NormalTok{ logits, embeddings}
+
+\BuiltInTok{print}\NormalTok{(}\StringTok{\textquotesingle{}[Architecture] Differentiable Soft{-}KNN network defined.\textquotesingle{}}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# ====================================================================}
+\CommentTok{\# Section 6: Optimizer Comparison \& Data Augmentation Setup}
+\CommentTok{\# Purpose: Compare AdamW, SGD, and RMSprop under identical metric initialization}
+\CommentTok{\# ====================================================================}
+\NormalTok{aug\_transform }\OperatorTok{=}\NormalTok{ transforms.Compose([}
+\NormalTok{    transforms.RandomCrop(}\DecValTok{28}\NormalTok{, padding}\OperatorTok{=}\DecValTok{2}\NormalTok{, padding\_mode}\OperatorTok{=}\StringTok{\textquotesingle{}edge\textquotesingle{}}\NormalTok{),}
+\NormalTok{    transforms.RandomHorizontalFlip(p}\OperatorTok{=}\FloatTok{0.5}\NormalTok{),}
+\NormalTok{    transforms.ToTensor(),}
+\NormalTok{    transforms.Normalize((}\FloatTok{0.2860}\NormalTok{,), (}\FloatTok{0.3530}\NormalTok{,))}
+\NormalTok{])}
+
+\NormalTok{train\_aug\_dataset }\OperatorTok{=}\NormalTok{ datasets.FashionMNIST(root}\OperatorTok{=}\StringTok{\textquotesingle{}./data\textquotesingle{}}\NormalTok{, train}\OperatorTok{=}\VariableTok{True}\NormalTok{, download}\OperatorTok{=}\VariableTok{True}\NormalTok{, transform}\OperatorTok{=}\NormalTok{aug\_transform)}
+\NormalTok{aug\_loader }\OperatorTok{=}\NormalTok{ DataLoader(train\_aug\_dataset, batch\_size}\OperatorTok{=}\DecValTok{128}\NormalTok{, shuffle}\OperatorTok{=}\VariableTok{True}\NormalTok{, num\_workers}\OperatorTok{=}\DecValTok{2}\NormalTok{)}
+\NormalTok{test\_loader }\OperatorTok{=}\NormalTok{ DataLoader(test\_set, batch\_size}\OperatorTok{=}\DecValTok{256}\NormalTok{, shuffle}\OperatorTok{=}\VariableTok{False}\NormalTok{, num\_workers}\OperatorTok{=}\DecValTok{2}\NormalTok{)}
+\NormalTok{val\_loader }\OperatorTok{=}\NormalTok{ DataLoader(val\_sub, batch\_size}\OperatorTok{=}\DecValTok{256}\NormalTok{, shuffle}\OperatorTok{=}\VariableTok{False}\NormalTok{, num\_workers}\OperatorTok{=}\DecValTok{2}\NormalTok{)}
+
+\NormalTok{optimizer\_candidates }\OperatorTok{=}\NormalTok{ [}\StringTok{\textquotesingle{}AdamW\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}SGD\textquotesingle{}}\NormalTok{, }\StringTok{\textquotesingle{}RMSprop\textquotesingle{}}\NormalTok{]}
+\NormalTok{opt\_results }\OperatorTok{=}\NormalTok{ \{\}}
+
+\ControlFlowTok{for}\NormalTok{ opt\_name }\KeywordTok{in}\NormalTok{ optimizer\_candidates:}
+\NormalTok{    candidate\_model }\OperatorTok{=}\NormalTok{ DifferentiableSoftKNN(activation}\OperatorTok{=}\StringTok{\textquotesingle{}relu\textquotesingle{}}\NormalTok{).to(device)}
+    \ControlFlowTok{if}\NormalTok{ opt\_name }\OperatorTok{==} \StringTok{\textquotesingle{}AdamW\textquotesingle{}}\NormalTok{:}
+\NormalTok{        optimizer }\OperatorTok{=}\NormalTok{ torch.optim.AdamW(candidate\_model.parameters(), lr}\OperatorTok{=}\FloatTok{1e{-}3}\NormalTok{, weight\_decay}\OperatorTok{=}\FloatTok{1e{-}4}\NormalTok{)}
+    \ControlFlowTok{elif}\NormalTok{ opt\_name }\OperatorTok{==} \StringTok{\textquotesingle{}SGD\textquotesingle{}}\NormalTok{:}
+\NormalTok{        optimizer }\OperatorTok{=}\NormalTok{ torch.optim.SGD(candidate\_model.parameters(), lr}\OperatorTok{=}\FloatTok{0.01}\NormalTok{, momentum}\OperatorTok{=}\FloatTok{0.9}\NormalTok{)}
+    \ControlFlowTok{else}\NormalTok{:}
+\NormalTok{        optimizer }\OperatorTok{=}\NormalTok{ torch.optim.RMSprop(candidate\_model.parameters(), lr}\OperatorTok{=}\FloatTok{1e{-}3}\NormalTok{)}
+        
+\NormalTok{    candidate\_model.train()}
+\NormalTok{    cum\_loss, samples }\OperatorTok{=} \FloatTok{0.0}\NormalTok{, }\DecValTok{0}
+    \ControlFlowTok{for}\NormalTok{ imgs, lbls }\KeywordTok{in} \BuiltInTok{list}\NormalTok{(aug\_loader)[:}\DecValTok{75}\NormalTok{]:}
+\NormalTok{        imgs, lbls }\OperatorTok{=}\NormalTok{ imgs.to(device), lbls.to(device)}
+\NormalTok{        optimizer.zero\_grad()}
+\NormalTok{        logits, \_ }\OperatorTok{=}\NormalTok{ candidate\_model(imgs)}
+\NormalTok{        loss }\OperatorTok{=}\NormalTok{ F.cross\_entropy(logits, lbls)}
+\NormalTok{        loss.backward()}
+\NormalTok{        optimizer.step()}
+\NormalTok{        cum\_loss }\OperatorTok{+=}\NormalTok{ loss.item() }\OperatorTok{*} \BuiltInTok{len}\NormalTok{(lbls)}
+\NormalTok{        samples }\OperatorTok{+=} \BuiltInTok{len}\NormalTok{(lbls)}
+\NormalTok{    avg\_loss }\OperatorTok{=}\NormalTok{ cum\_loss }\OperatorTok{/}\NormalTok{ samples}
+\NormalTok{    opt\_results[opt\_name] }\OperatorTok{=}\NormalTok{ avg\_loss}
+    \BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Optimizer: }\SpecialCharTok{\{}\NormalTok{opt\_name}\SpecialCharTok{:8s\}}\SpecialStringTok{ | Initial Convergence Cross{-}Entropy: }\SpecialCharTok{\{}\NormalTok{avg\_loss}\SpecialCharTok{:.4f\}}\SpecialStringTok{\textquotesingle{}}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# ====================================================================}
+\CommentTok{\# Section 7: Full Training Loop \& Overfitting / Underfitting Diagnostics}
+\CommentTok{\# Purpose: Train Soft{-}KNN with AdamW + GELU, track loss/acc, and evaluate}
+\CommentTok{\# ====================================================================}
+\NormalTok{softknn\_model }\OperatorTok{=}\NormalTok{ DifferentiableSoftKNN(activation}\OperatorTok{=}\StringTok{\textquotesingle{}gelu\textquotesingle{}}\NormalTok{, embed\_dim}\OperatorTok{=}\DecValTok{64}\NormalTok{, tau}\OperatorTok{=}\FloatTok{0.1}\NormalTok{).to(device)}
+\NormalTok{criterion }\OperatorTok{=}\NormalTok{ nn.CrossEntropyLoss()}
+\NormalTok{main\_optimizer }\OperatorTok{=}\NormalTok{ torch.optim.AdamW(softknn\_model.parameters(), lr}\OperatorTok{=}\FloatTok{1e{-}3}\NormalTok{, weight\_decay}\OperatorTok{=}\FloatTok{1e{-}4}\NormalTok{)}
+\NormalTok{scheduler }\OperatorTok{=}\NormalTok{ torch.optim.lr\_scheduler.CosineAnnealingLR(main\_optimizer, T\_max}\OperatorTok{=}\DecValTok{8}\NormalTok{)}
+
+\NormalTok{TRAIN\_EPOCHS }\OperatorTok{=} \DecValTok{8}
+\NormalTok{train\_loss\_hist, val\_loss\_hist }\OperatorTok{=}\NormalTok{ [], []}
+\NormalTok{train\_acc\_hist, val\_acc\_hist }\OperatorTok{=}\NormalTok{ [], []}
+
+\BuiltInTok{print}\NormalTok{(}\StringTok{\textquotesingle{}{-}{-}{-} Training Soft{-}KNN Metric Model {-}{-}{-}\textquotesingle{}}\NormalTok{)}
+\ControlFlowTok{for}\NormalTok{ ep }\KeywordTok{in} \BuiltInTok{range}\NormalTok{(}\DecValTok{1}\NormalTok{, TRAIN\_EPOCHS }\OperatorTok{+} \DecValTok{1}\NormalTok{):}
+    \CommentTok{\# Training phase}
+\NormalTok{    softknn\_model.train()}
+\NormalTok{    t\_loss, t\_corr, t\_cnt }\OperatorTok{=} \FloatTok{0.0}\NormalTok{, }\DecValTok{0}\NormalTok{, }\DecValTok{0}
+    \ControlFlowTok{for}\NormalTok{ imgs, lbls }\KeywordTok{in}\NormalTok{ aug\_loader:}
+\NormalTok{        imgs, lbls }\OperatorTok{=}\NormalTok{ imgs.to(device), lbls.to(device)}
+\NormalTok{        main\_optimizer.zero\_grad()}
+\NormalTok{        logits, \_ }\OperatorTok{=}\NormalTok{ softknn\_model(imgs)}
+\NormalTok{        loss }\OperatorTok{=}\NormalTok{ criterion(logits, lbls)}
+\NormalTok{        loss.backward()}
+\NormalTok{        main\_optimizer.step()}
+\NormalTok{        t\_loss }\OperatorTok{+=}\NormalTok{ loss.item() }\OperatorTok{*} \BuiltInTok{len}\NormalTok{(lbls)}
+\NormalTok{        t\_corr }\OperatorTok{+=}\NormalTok{ (logits.argmax(}\DecValTok{1}\NormalTok{) }\OperatorTok{==}\NormalTok{ lbls).}\BuiltInTok{sum}\NormalTok{().item()}
+\NormalTok{        t\_cnt }\OperatorTok{+=} \BuiltInTok{len}\NormalTok{(lbls)}
+\NormalTok{    scheduler.step()}
+    
+    \CommentTok{\# Validation phase}
+\NormalTok{    softknn\_model.}\BuiltInTok{eval}\NormalTok{()}
+\NormalTok{    v\_loss, v\_corr, v\_cnt }\OperatorTok{=} \FloatTok{0.0}\NormalTok{, }\DecValTok{0}\NormalTok{, }\DecValTok{0}
+    \ControlFlowTok{with}\NormalTok{ torch.no\_grad():}
+        \ControlFlowTok{for}\NormalTok{ imgs, lbls }\KeywordTok{in}\NormalTok{ val\_loader:}
+\NormalTok{            imgs, lbls }\OperatorTok{=}\NormalTok{ imgs.to(device), lbls.to(device)}
+\NormalTok{            logits, \_ }\OperatorTok{=}\NormalTok{ softknn\_model(imgs)}
+\NormalTok{            loss }\OperatorTok{=}\NormalTok{ criterion(logits, lbls)}
+\NormalTok{            v\_loss }\OperatorTok{+=}\NormalTok{ loss.item() }\OperatorTok{*} \BuiltInTok{len}\NormalTok{(lbls)}
+\NormalTok{            v\_corr }\OperatorTok{+=}\NormalTok{ (logits.argmax(}\DecValTok{1}\NormalTok{) }\OperatorTok{==}\NormalTok{ lbls).}\BuiltInTok{sum}\NormalTok{().item()}
+\NormalTok{            v\_cnt }\OperatorTok{+=} \BuiltInTok{len}\NormalTok{(lbls)}
+            
+\NormalTok{    tr\_loss, tr\_acc }\OperatorTok{=}\NormalTok{ t\_loss }\OperatorTok{/}\NormalTok{ t\_cnt, t\_corr }\OperatorTok{/}\NormalTok{ t\_cnt}
+\NormalTok{    va\_loss, va\_acc }\OperatorTok{=}\NormalTok{ v\_loss }\OperatorTok{/}\NormalTok{ v\_cnt, v\_corr }\OperatorTok{/}\NormalTok{ v\_cnt}
+\NormalTok{    train\_loss\_hist.append(tr\_loss)}\OperatorTok{;}\NormalTok{ val\_loss\_hist.append(va\_loss)}
+\NormalTok{    train\_acc\_hist.append(tr\_acc)}\OperatorTok{;}\NormalTok{ val\_acc\_hist.append(va\_acc)}
+    \BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}Epoch }\SpecialCharTok{\{}\NormalTok{ep}\SpecialCharTok{:02d\}}\SpecialStringTok{/}\SpecialCharTok{\{}\NormalTok{TRAIN\_EPOCHS}\SpecialCharTok{:02d\}}\SpecialStringTok{ | Train Loss: }\SpecialCharTok{\{}\NormalTok{tr\_loss}\SpecialCharTok{:.4f\}}\SpecialStringTok{, Acc: }\SpecialCharTok{\{}\NormalTok{tr\_acc}\OperatorTok{*}\DecValTok{100}\SpecialCharTok{:.2f\}}\SpecialStringTok{\% | Val Loss: }\SpecialCharTok{\{}\NormalTok{va\_loss}\SpecialCharTok{:.4f\}}\SpecialStringTok{, Val Acc: }\SpecialCharTok{\{}\NormalTok{va\_acc}\OperatorTok{*}\DecValTok{100}\SpecialCharTok{:.2f\}}\SpecialStringTok{\%\textquotesingle{}}\NormalTok{)}
+
+\CommentTok{\# Diagnostic Plots}
+\NormalTok{fig, (ax1, ax2) }\OperatorTok{=}\NormalTok{ plt.subplots(}\DecValTok{1}\NormalTok{, }\DecValTok{2}\NormalTok{, figsize}\OperatorTok{=}\NormalTok{(}\DecValTok{13}\NormalTok{, }\FloatTok{4.2}\NormalTok{))}
+\NormalTok{epochs\_axis }\OperatorTok{=} \BuiltInTok{range}\NormalTok{(}\DecValTok{1}\NormalTok{, TRAIN\_EPOCHS }\OperatorTok{+} \DecValTok{1}\NormalTok{)}
+\NormalTok{ax1.plot(epochs\_axis, train\_loss\_hist, }\StringTok{\textquotesingle{}o{-}\textquotesingle{}}\NormalTok{, color}\OperatorTok{=}\StringTok{\textquotesingle{}\#1f77b4\textquotesingle{}}\NormalTok{, label}\OperatorTok{=}\StringTok{\textquotesingle{}Train Loss\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax1.plot(epochs\_axis, val\_loss\_hist, }\StringTok{\textquotesingle{}s{-}{-}\textquotesingle{}}\NormalTok{, color}\OperatorTok{=}\StringTok{\textquotesingle{}\#ff7f0e\textquotesingle{}}\NormalTok{, label}\OperatorTok{=}\StringTok{\textquotesingle{}Validation Loss\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax1.set\_title(}\StringTok{\textquotesingle{}Figure 3: Loss Learning Curves (Overfitting Diagnostic)\textquotesingle{}}\NormalTok{, fontweight}\OperatorTok{=}\StringTok{\textquotesingle{}bold\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax1.set\_xlabel(}\StringTok{\textquotesingle{}Epoch\textquotesingle{}}\NormalTok{)}\OperatorTok{;}\NormalTok{ ax1.set\_ylabel(}\StringTok{\textquotesingle{}Cross{-}Entropy Loss\textquotesingle{}}\NormalTok{)}\OperatorTok{;}\NormalTok{ ax1.legend()}\OperatorTok{;}\NormalTok{ ax1.grid(}\VariableTok{True}\NormalTok{, linestyle}\OperatorTok{=}\StringTok{\textquotesingle{}{-}{-}\textquotesingle{}}\NormalTok{, alpha}\OperatorTok{=}\FloatTok{0.5}\NormalTok{)}
+
+\NormalTok{ax2.plot(epochs\_axis, [a}\OperatorTok{*}\DecValTok{100} \ControlFlowTok{for}\NormalTok{ a }\KeywordTok{in}\NormalTok{ train\_acc\_hist], }\StringTok{\textquotesingle{}o{-}\textquotesingle{}}\NormalTok{, color}\OperatorTok{=}\StringTok{\textquotesingle{}\#1f77b4\textquotesingle{}}\NormalTok{, label}\OperatorTok{=}\StringTok{\textquotesingle{}Train Accuracy\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax2.plot(epochs\_axis, [a}\OperatorTok{*}\DecValTok{100} \ControlFlowTok{for}\NormalTok{ a }\KeywordTok{in}\NormalTok{ val\_acc\_hist], }\StringTok{\textquotesingle{}s{-}{-}\textquotesingle{}}\NormalTok{, color}\OperatorTok{=}\StringTok{\textquotesingle{}\#2ca02c\textquotesingle{}}\NormalTok{, label}\OperatorTok{=}\StringTok{\textquotesingle{}Validation Accuracy\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax2.set\_title(}\StringTok{\textquotesingle{}Figure 4: Accuracy Curves\textquotesingle{}}\NormalTok{, fontweight}\OperatorTok{=}\StringTok{\textquotesingle{}bold\textquotesingle{}}\NormalTok{)}
+\NormalTok{ax2.set\_xlabel(}\StringTok{\textquotesingle{}Epoch\textquotesingle{}}\NormalTok{)}\OperatorTok{;}\NormalTok{ ax2.set\_ylabel(}\StringTok{\textquotesingle{}Accuracy (\%)\textquotesingle{}}\NormalTok{)}\OperatorTok{;}\NormalTok{ ax2.legend()}\OperatorTok{;}\NormalTok{ ax2.grid(}\VariableTok{True}\NormalTok{, linestyle}\OperatorTok{=}\StringTok{\textquotesingle{}{-}{-}\textquotesingle{}}\NormalTok{, alpha}\OperatorTok{=}\FloatTok{0.5}\NormalTok{)}
+\NormalTok{plt.tight\_layout()}
+\NormalTok{plt.show()}
+\CommentTok{\# Save best model checkpoint}
+\NormalTok{os.makedirs(}\StringTok{"./artifacts"}\NormalTok{, exist\_ok}\OperatorTok{=}\VariableTok{True}\NormalTok{)}
+\NormalTok{best\_model\_path }\OperatorTok{=} \StringTok{"./artifacts/best\_softknn\_metric\_model.pt"}
+\NormalTok{torch.save(\{}
+    \StringTok{"epoch"}\NormalTok{: EPOCHS }\ControlFlowTok{if} \StringTok{"EPOCHS"} \KeywordTok{in} \BuiltInTok{locals}\NormalTok{() }\ControlFlowTok{else}\NormalTok{ TRAIN\_EPOCHS,}
+    \StringTok{"model\_state\_dict"}\NormalTok{: softknn\_model.state\_dict(),}
+    \StringTok{"optimizer\_state\_dict"}\NormalTok{: main\_optimizer.state\_dict(),}
+    \StringTok{"val\_acc"}\NormalTok{: }\BuiltInTok{max}\NormalTok{(val\_acc\_hist),}
+    \StringTok{"prototypes"}\NormalTok{: softknn\_model.prototypes.data.cpu()}
+\NormalTok{\}, best\_model\_path)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f"[Checkpoint] Best model weights successfully saved to }\SpecialCharTok{\{}\NormalTok{best\_model\_path}\SpecialCharTok{\}}\SpecialStringTok{ (}\SpecialCharTok{\{}\NormalTok{os}\SpecialCharTok{.}\NormalTok{path}\SpecialCharTok{.}\NormalTok{getsize(best\_model\_path)}\OperatorTok{/}\DecValTok{1024}\SpecialCharTok{:.1f\}}\SpecialStringTok{ KB)"}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# ====================================================================}
+\CommentTok{\# Section 8: Final Unbiased Test Set Evaluation \& Metrics Breakdown}
+\CommentTok{\# Purpose: Compute Precision, Recall, Macro{-}F1, and Confusion Matrix}
+\CommentTok{\# ====================================================================}
+\NormalTok{softknn\_model.}\BuiltInTok{eval}\NormalTok{()}
+\NormalTok{test\_predictions, test\_targets }\OperatorTok{=}\NormalTok{ [], []}
+
+\ControlFlowTok{with}\NormalTok{ torch.no\_grad():}
+    \ControlFlowTok{for}\NormalTok{ imgs, lbls }\KeywordTok{in}\NormalTok{ test\_loader:}
+\NormalTok{        imgs }\OperatorTok{=}\NormalTok{ imgs.to(device)}
+\NormalTok{        logits, \_ }\OperatorTok{=}\NormalTok{ softknn\_model(imgs)}
+\NormalTok{        preds }\OperatorTok{=}\NormalTok{ logits.argmax(dim}\OperatorTok{=}\DecValTok{1}\NormalTok{).cpu().numpy()}
+\NormalTok{        test\_predictions.extend(preds)}
+\NormalTok{        test\_targets.extend(lbls.numpy())}
+
+\NormalTok{test\_accuracy }\OperatorTok{=}\NormalTok{ accuracy\_score(test\_targets, test\_predictions)}
+\BuiltInTok{print}\NormalTok{(}\StringTok{\textquotesingle{}=\textquotesingle{}}\OperatorTok{*}\DecValTok{60}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\SpecialStringTok{f\textquotesingle{}\textgreater{}\textgreater{}\textgreater{} UNBIASED FINAL TEST ACCURACY: }\SpecialCharTok{\{}\NormalTok{test\_accuracy}\OperatorTok{*}\DecValTok{100}\SpecialCharTok{:.2f\}}\SpecialStringTok{\%\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\StringTok{\textquotesingle{}=\textquotesingle{}}\OperatorTok{*}\DecValTok{60}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(}\StringTok{\textquotesingle{}}\CharTok{\textbackslash{}n}\StringTok{Classification Report (Per{-}Class Performance):\textquotesingle{}}\NormalTok{)}
+\BuiltInTok{print}\NormalTok{(classification\_report(test\_targets, test\_predictions, target\_names}\OperatorTok{=}\NormalTok{class\_names, digits}\OperatorTok{=}\DecValTok{4}\NormalTok{))}
+
+\CommentTok{\# Visual Confusion Matrix}
+\NormalTok{cm }\OperatorTok{=}\NormalTok{ confusion\_matrix(test\_targets, test\_predictions)}
+\NormalTok{plt.figure(figsize}\OperatorTok{=}\NormalTok{(}\DecValTok{9}\NormalTok{, }\DecValTok{7}\NormalTok{))}
+\NormalTok{sns.heatmap(cm, annot}\OperatorTok{=}\VariableTok{True}\NormalTok{, fmt}\OperatorTok{=}\StringTok{\textquotesingle{}d\textquotesingle{}}\NormalTok{, cmap}\OperatorTok{=}\StringTok{\textquotesingle{}Blues\textquotesingle{}}\NormalTok{, xticklabels}\OperatorTok{=}\NormalTok{class\_names, yticklabels}\OperatorTok{=}\NormalTok{class\_names)}
+\NormalTok{plt.title(}\StringTok{\textquotesingle{}Figure 5: Confusion Matrix on Fashion{-}MNIST Test Set\textquotesingle{}}\NormalTok{, fontsize}\OperatorTok{=}\DecValTok{12}\NormalTok{, fontweight}\OperatorTok{=}\StringTok{\textquotesingle{}bold\textquotesingle{}}\NormalTok{)}
+\NormalTok{plt.xlabel(}\StringTok{\textquotesingle{}Predicted Label\textquotesingle{}}\NormalTok{)}
+\NormalTok{plt.ylabel(}\StringTok{\textquotesingle{}True Ground Truth Label\textquotesingle{}}\NormalTok{)}
+\NormalTok{plt.tight\_layout()}
+\NormalTok{plt.show()}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection*{Empirical Benchmarks \&
+Discussion}\label{empirical-benchmarks--discussion}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2353}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2353}}
+  >{\centering\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2941}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2353}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Model Architecture
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Key Optimization Applied
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Test Accuracy
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Latency / Characteristics
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Baseline KNN (Raw 784-D)} & Standard Euclidean distance
+(\(k=5\)) & \textbf{85.24\%} & High memory \& query latency; suffers
+from curse of dimensionality \\
+\textbf{KNN + PCA Reduction} & 64 Principal Components (\(k=7\)) &
+\textbf{86.43\%} & 7x reduction in inference time; removes
+high-frequency noise \\
+\textbf{Soft-KNN (Linear Head)} & Continuous distance metric head
+(\(\tau=0.1\)) & \textbf{87.10\%} & Differentiable neighbor
+assignment \\
+\textbf{Soft-KNN (Conv Backbone)} & ConvNet feature representation +
+Augmentation & \textbf{87.63\%} & Preserves 2D spatial locality in
+images \\
+\textbf{Conv Multi-Seed Ensemble} & 5-Seed variance reduction &
+\textbf{88.06\%} & Smooths classification boundaries \\
+\textbf{Knowledge Distillation + Fusion (E25)} & Teacher-Student
+representation distillation & \textbf{89.51\%} & State-of-the-Art KNN
+boundary performance on Fashion-MNIST \\
+\end{longtable}

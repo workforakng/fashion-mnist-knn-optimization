@@ -18,3 +18,11 @@ storage.md
 .omo/
 .opencode/
 AGENTS.md
+
+# LaTeX build intermediates (keep only named submission PDFs)
+docs/*.aux
+docs/*.out
+docs/*.toc
+docs/paper.pdf
+docs/paper_final.pdf
+docs/paper_member*.pdf
