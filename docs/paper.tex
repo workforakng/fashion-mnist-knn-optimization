@@ -97,20 +97,28 @@ Convolutional Metrics, Knowledge Distillation and Convex Fusion (89.5\,\%)}
 \vspace{0.5em}
 \begin{abstract}
 \noindent
-Classical $k$-nearest neighbors applied to raw 784-dimensional pixel vectors suffers
-from distance concentration---the curse of dimensionality---and discards the two-dimensional
-spatial topology of images. This report documents a principled, fully reproducible
-optimization ladder that transforms KNN from an 85.2\,\% baseline classifier into a
-89.5\,\% system on Fashion-MNIST, without ever abandoning the nearest-neighbor paradigm.
-The central contribution is \emph{Soft-KNN}: a differentiable reformulation in which a
-temperature-scaled softmax over negative distances to the $k$ nearest anchors of each
-class replaces the hard majority vote, enabling end-to-end gradient-based learning of the
-metric space itself. Stacked refinements---a MoCo-style memory bank, a convolutional
-metric backbone preserving spatial priors, multi-seed prediction averaging, ensemble
-knowledge distillation, and test-time augmentation with simplex-optimised convex
-fusion---yield a monotonic accuracy progression of $+4.3$ percentage points over the
-classical baseline. All experiments are logged to a machine-readable ledger, and the
-complete pipeline reproduces cell-by-cell in a standalone Google Colab notebook.
+The $k$-nearest-neighbours (KNN) rule is among the simplest and most transparent
+classifiers: it stores the training set and assigns to a query the majority label of
+its closest samples. On high-dimensional images, however, it faces two structural
+obstacles. In 784-dimensional pixel space, pairwise distances concentrate, so the
+notion of ``nearest'' loses discriminative meaning; and flattening a $28\times28$
+image into a vector discards the spatial adjacency of pixels. Plain KNN therefore
+attains only 85.24\,\% test accuracy on Fashion-MNIST. This report presents a
+systematic and fully reproducible optimisation study that raises this figure to
+89.51\,\% without ever departing from the nearest-neighbour paradigm. The
+progression proceeds in four stages: (i)~principal component analysis compresses
+the input to 64 dimensions, mitigating distance concentration while accelerating
+inference by $7.08\times$; (ii)~we introduce \emph{Soft-KNN}, a differentiable
+reformulation in which the hard majority vote is replaced by a temperature-scaled
+softmax over distances to each class's nearest anchors, rendering the decision rule
+smooth and the metric space itself learnable by gradient descent; (iii)~a
+lightweight convolutional backbone replaces the linear projection, preserving the
+spatial prior of images; and (iv)~multi-seed ensembling, knowledge distillation, and
+test-time augmentation, combined through validation-optimised convex fusion,
+consolidate the gains of every preceding stage. All experiments are recorded in a
+machine-readable ledger, negative results are reported with the same rigour as
+positive ones, and the complete pipeline reproduces end-to-end from a single
+standalone Google Colab notebook.
 \end{abstract}
 
 \vspace{0.5em}
