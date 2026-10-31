@@ -6,7 +6,7 @@
 % =====================================================================
 \documentclass[11pt,a4paper]{article}
 
-\usepackage[margin=2.0cm]{geometry}
+\usepackage[top=1.5cm,bottom=1.5cm,left=2.0cm,right=2.0cm]{geometry}
 \usepackage{graphicx}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
@@ -26,8 +26,20 @@
 \usepackage[colorlinks=true,linkcolor=blue!60!black,urlcolor=blue!60!black,citecolor=blue!60!black]{hyperref}
 
 \graphicspath{{figures/}{./}}
-\captionsetup{font=small,labelfont=bf}
-\setlength{\parskip}{0.35em}
+\captionsetup{font=small,labelfont=bf,skip=4pt}
+\setlength{\parskip}{0.25em}
+\raggedbottom
+
+% ---- compact vertical rhythm (content unchanged, whitespace reduced) ----
+\setlength{\textfloatsep}{10pt plus 2pt minus 4pt}
+\setlength{\floatsep}{7pt plus 2pt minus 2pt}
+\setlength{\intextsep}{9pt plus 2pt minus 3pt}
+\setlength{\abovecaptionskip}{4pt}
+\setlength{\belowcaptionskip}{1pt}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{*2.0}{*1.0}
+\titlespacing*{\subsection}{0pt}{*1.6}{*0.7}
+\titlespacing*{\subsubsection}{0pt}{*1.4}{*0.5}
 
 % ---- pandoc fragment support (Appendix A/B) ----
 \providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
