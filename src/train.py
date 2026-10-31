@@ -40,7 +40,18 @@ def train_softknn(x_fit, y_fit, x_val, y_val, cfg: dict, device=None, verbose=Tr
 
     cfg keys: embed_dim, k, tau, lr, optimizer, epochs, batch_size, patience,
               augment (dict for Augmenter, or None), augmented_bank_copies (int),
-              pca_components (ndarray or None), seed.
+              pca_components (ndarray or None), seed,
+              exclude_self (bool, default False; see below).
+
+    Self-match caveat: the memory bank is built from the same training images
+    that are used as queries (bank_x = x_img). Without masking, every query
+    finds its own (slightly stale) embedding at distance ~0, plus its own
+    augmented copies when augmented_bank_copies > 0. That inflates train_acc /
+    train_loss in the history by roughly 8-10 points and lets the loss reward
+    "stay close to your own bank entry". Validation and test are barely
+    affected because they never appear in the bank. exclude_self=True masks a
+    query's own bank indices (leave-one-out, as in NCA). The default stays
+    False so the logged results in results/results.json remain reproducible.
 
     Returns (model, history, best_val_acc).
     """
@@ -71,6 +82,9 @@ def train_softknn(x_fit, y_fit, x_val, y_val, cfg: dict, device=None, verbose=Tr
         bank_y = torch.cat([bank_y] + [y_t] * n_copies, dim=0)
         if verbose:
             print(f"[softknn] augmented memory bank: {bank_x.shape[0]} anchors")
+    # Opt-in leave-one-out: bank entry j*n + i is a copy of training image i.
+    exclude_self = bool(cfg.get("exclude_self", False))
+    copy_offsets = torch.arange(bank_x.shape[0] // n, device=device) * n
 
     history = []
     best_val, best_state, best_epoch = -1.0, None, -1
@@ -101,7 +115,9 @@ def train_softknn(x_fit, y_fit, x_val, y_val, cfg: dict, device=None, verbose=Tr
             with torch.autocast("cuda", dtype=torch.float16, enabled=use_amp):
                 zq = model.embed(xb.flatten(1))
             zq = zq.float()
-            logits = model.logits_from_z(zq, bank_z, bank_y, cfg["k"], cfg["tau"])
+            self_idx = (idx.unsqueeze(1) + copy_offsets) if exclude_self else None
+            logits = model.logits_from_z(zq, bank_z, bank_y, cfg["k"], cfg["tau"],
+                                         self_idx=self_idx)
             loss = F.cross_entropy(logits, yb)
             alpha = float(cfg.get("distill_alpha", 0.0))
             if alpha > 0 and soft_targets is not None:

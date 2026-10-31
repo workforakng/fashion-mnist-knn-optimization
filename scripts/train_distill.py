@@ -2,7 +2,15 @@
 
 Teacher = mean probability of the trained conv seed artifacts on the train set
 (soft labels via tau=1.0). Student = fresh conv-metric Soft-KNN trained with
-loss = (1-alpha)*CE + alpha*KL(student || teacher).
+loss = (1-alpha)*CE + alpha*KL(teacher || student)   (Hinton direction; this is
+what F.kl_div(log_softmax(student), teacher) computes).
+
+Self-match caveat: the teacher is queried on the very images that form its
+memory bank, so by default each image matches itself at distance ~0 and the
+soft targets are biased toward the hard labels. --exclude-self masks each
+image's own bank entry (leave-one-out) for the teacher targets and for the
+student's training queries. Off by default to reproduce the logged runs
+(results/kaggle_distill*.json).
 """
 import argparse
 import glob
@@ -26,6 +34,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--epochs", type=int, default=35)
     ap.add_argument("--alpha", type=float, default=0.5)
+    ap.add_argument("--exclude-self", action="store_true",
+                    help="leave-one-out teacher targets and training queries")
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -39,7 +49,8 @@ def main():
         m = load_softknn(path, device)
         with torch.no_grad():
             bz = embed_chunked(m, xa_t)
-        p = predict_probs(m, bz, ya_t, xa, k=9, tau=1.0, device=device).numpy()
+        p = predict_probs(m, bz, ya_t, xa, k=9, tau=1.0, device=device,
+                          exclude_self=args.exclude_self).numpy()
         teacher = p if teacher is None else teacher + p
         n_te += 1
     if not n_te:
@@ -52,7 +63,7 @@ def main():
            "patience": 10, "augment": None, "augmented_bank_copies": 0,
            "bank_refresh_steps": 107, "clip_grad": 1.0, "seed": 100, "amp": True,
            "distill_soft_targets": teacher, "distill_alpha": args.alpha,
-           "distill_T": 1.0}
+           "distill_T": 1.0, "exclude_self": args.exclude_self}
     model, history, best_val = train_softknn(xa, ya, xv, yv, cfg, device=device)
     with torch.no_grad():
         bank_z = embed_chunked(model, xa_t)
