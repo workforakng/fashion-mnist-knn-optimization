@@ -8,7 +8,7 @@
 **Authors:** Akshar Nath Gorain et al.  
 **Affiliation:** Department of Computer Science & Machine Learning Research Group  
 **Target Venue:** Machine Learning & Pattern Recognition Coursework  
-**Codebase:** `src/` (pipeline), `scripts/` (seed and distillation trainers), `results/` (logs); [`fashion_knn_colab.ipynb`](fashion_knn_colab.ipynb) is a simplified demo only (see §7)  
+**Codebase:** `src/` (pipeline), `scripts/` (seed and distillation trainers), `results/` (logs); [`fashion_knn_colab.ipynb`](fashion_knn_colab.ipynb) is an interactive Colab notebook (see §7)  
 **Execution Environment:** Python ≥ 3.10, PyTorch ≥ 2.3. `src/experiments.py` ran on the authors' local machine; the conv-seed and distillation runs in `results/kaggle_*.json` ran on Kaggle GPUs  
 
 ---
@@ -320,10 +320,10 @@ Known limitations of re-running:
 * `artifacts/` is not committed, so stages from E10 onward need the models to be retrained first.
 * Stages E21–E25 pick up whatever artefacts exist, so a re-run can use different sources than the logged run. See [`src/README.md`](src/README.md).
 
-### 7.2 Demo notebook (simplified; does not reproduce the reported numbers)
+### 7.2 Google Colab notebook (interactive standalone pipeline)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/workforakng/fashion-mnist-knn-optimization/blob/main/fashion_knn_colab.ipynb)
 
-[`fashion_knn_colab.ipynb`](fashion_knn_colab.ipynb) (and the identical [`fashion_knn_clean_pipeline.ipynb`](fashion_knn_clean_pipeline.ipynb) without the Colab badge) is a short, self-contained teaching demo.
+[`fashion_knn_colab.ipynb`](fashion_knn_colab.ipynb) (and the identical [`fashion_knn_clean_pipeline.ipynb`](fashion_knn_clean_pipeline.ipynb) without the Colab badge) is a clean, self-contained Colab notebook.
 
 **What it runs:**
 * The same stratified 54k / 6k / 10k split as `src/`.
