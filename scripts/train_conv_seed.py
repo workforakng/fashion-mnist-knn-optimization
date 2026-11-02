@@ -24,6 +24,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--epochs", type=int, default=40)
+    ap.add_argument("--exclude-self", action="store_true",
+                    help="leave-one-out: mask each training query's own bank "
+                         "entry (off by default, as in the logged runs)")
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -32,7 +35,7 @@ def main():
            "optimizer": "adam", "epochs": args.epochs, "batch_size": 256,
            "patience": 10, "augment": None, "augmented_bank_copies": 0,
            "bank_refresh_steps": 107, "clip_grad": 1.0, "seed": args.seed,
-           "amp": True}
+           "amp": True, "exclude_self": args.exclude_self}
     model, history, best_val = train_softknn(xa, ya, xv, yv, cfg, device=device)
     with torch.no_grad():
         bank_z = embed_chunked(model, torch.as_tensor(xa, dtype=torch.float32,

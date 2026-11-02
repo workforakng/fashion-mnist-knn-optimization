@@ -58,12 +58,20 @@ def latency_benchmark(xa, ya, xq, yq, variants, algos=("brute", "kd_tree", "ball
     """Median fit/query latency per (feature variant x algorithm).
 
     variants: list of {"name": str, "xa": array, "xq": array}.
+    Each row also records n_queries (all of xq is predicted in one call),
+    n_jobs (from KNN_NJOBS, default 4) and the number of timed repeats
+    (brute: `repeats`, trees: 1). One untimed warm-up query on a small slice
+    precedes the timed runs.
     """
     rows = []
     for var in variants:
         for algo in algos:
             fit_ts, q_ts, accs = [], [], []
             error = None
+            try:  # untimed warm-up (thread pool, BLAS, page cache)
+                make_knn(k=k, algorithm=algo).fit(var["xa"], ya).predict(var["xq"][:64])
+            except Exception:  # noqa: BLE001 - the timed loop records the error
+                pass
             # Tree backends degenerate in high dimensions; 1 repeat is enough
             # to demonstrate that (brute keeps `repeats` for a stable median).
             reps = repeats if algo == "brute" else 1
@@ -84,7 +92,9 @@ def latency_benchmark(xa, ya, xq, yq, variants, algos=("brute", "kd_tree", "ball
             row = {"variant": var["name"], "algorithm": algo,
                    "fit_s_median": float(np.median(fit_ts)),
                    "query_s_median": float(np.median(q_ts)),
-                   "val_acc": float(np.mean(accs))}
+                   "val_acc": float(np.mean(accs)),
+                   "n_queries": int(len(var["xq"])), "n_jobs": clf.n_jobs,
+                   "repeats": len(q_ts), "warmup": True}
             rows.append(row)
             print(f"[latency] {var['name']:>8s} {algo:>10s} "
                   f"fit={row['fit_s_median']:.2f}s query={row['query_s_median']:.3f}s "

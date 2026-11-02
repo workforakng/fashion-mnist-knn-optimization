@@ -15,8 +15,8 @@ from src.augment import (Augmenter, random_erasing, random_hflip, random_rotate,
 from src.classical import eval_knn, fit_pca, make_knn  # noqa: E402
 from src.data import load_splits  # noqa: E402
 from src.evaluate import full_metrics  # noqa: E402
-from src.softknn import (SoftKNN, per_class_topk_logits, predict_probs,  # noqa: E402
-                         predict_probs_tta)
+from src.softknn import (SoftKNN, mask_self_matches, per_class_topk_logits,  # noqa: E402
+                         predict_probs, predict_probs_tta)
 from src.train import train_softknn  # noqa: E402
 
 
@@ -60,6 +60,40 @@ def main():
     expected = torch.tensor([[0.0, -4.0], [-8.0, -4.0]])
     assert torch.allclose(logits, expected), logits
     print("per_class_topk_logits OK")
+
+    print("== exclude_self (leave-one-out) on random data ==")
+    g = torch.Generator().manual_seed(0)
+    xr = torch.rand(300, 784, generator=g)
+    yr = torch.arange(300) % 10
+    # mask helper: the query's own column becomes +inf, nothing else changes
+    d = torch.rand(4, 6, generator=g)
+    dm = mask_self_matches(d, torch.tensor([0, 1, 2, 3]))
+    assert torch.isinf(dm[torch.arange(4), torch.arange(4)]).all()
+    assert torch.isfinite(dm).sum() == 4 * 6 - 4
+    m_r = SoftKNN(embed_dim=16).eval()
+    with torch.no_grad():
+        bz = m_r.embed(xr)
+        # k=1: with self kept, every bank point's nearest same-class anchor is
+        # itself (distance 0) -> train accuracy is trivially 100 %.
+        p_self = predict_probs(m_r, bz, yr, xr, k=1, tau=0.5, device="cpu")
+        p_loo = predict_probs(m_r, bz, yr, xr, k=1, tau=0.5, device="cpu",
+                              exclude_self=True)
+    acc_self = (p_self.argmax(1) == yr).float().mean().item()
+    acc_loo = (p_loo.argmax(1) == yr).float().mean().item()
+    assert acc_self == 1.0, acc_self
+    assert acc_loo < 0.5, acc_loo  # random labels: LOO is ~chance
+    assert torch.allclose(p_loo.sum(1), torch.ones(300))
+    # training path, including augmented bank copies (bank = 2 x 300 anchors)
+    cfg_r = dict(embed_dim=16, k=3, tau=0.5, lr=1e-3, optimizer="adam", epochs=1,
+                 batch_size=64, patience=1,
+                 augment={"hflip_p": 0.5, "shift_px": 1, "erase": False},
+                 augmented_bank_copies=1, seed=0, exclude_self=True)
+    _m, hist_r, _bv = train_softknn(xr.numpy(), yr.numpy(), xr[:50].numpy(),
+                                    yr[:50].numpy(), cfg_r, device="cpu",
+                                    verbose=False)
+    assert len(hist_r) == 1 and hist_r[0]["train_loss"] == hist_r[0]["train_loss"]
+    print(f"exclude_self OK (k=1 random-label train acc: self={acc_self:.2f} "
+          f"loo={acc_loo:.2f})")
 
     print("== train softknn ==")
     cfg = dict(embed_dim=32, k=5, tau=0.5, lr=1e-3, optimizer="adam", epochs=2,

@@ -7,11 +7,15 @@ Usage:
 Every stage appends one JSON entry to results/results.json (the ledger) and
 saves its figures under figures/. Stages already present in the ledger are
 skipped unless --force.
+
+--exclude-self (opt-in, default off) enables leave-one-out masking of each
+training image's own memory-bank entry, both during Soft-KNN training and when
+distillation teacher targets are computed on the training set (E23, E26).
+The logged results were produced WITHOUT it (see src/README.md, "Self-match").
 """
 from __future__ import annotations
 
 import argparse
-import copy
 import json
 import os
 import time
@@ -26,13 +30,52 @@ from sklearn.model_selection import train_test_split
 from . import classical, evaluate
 from .augment import Augmenter
 from .data import CLASS_NAMES, load_raw, load_splits
-from .softknn import (SoftKNN, predict_probs, predict_probs_tta, load_softknn,
+from .softknn import (predict_probs, predict_probs_tta, load_softknn,
                       embed_chunked)
-from .train import train_softknn
+from .train import train_softknn as _train_softknn
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_PATH = os.path.join(REPO_ROOT, "results", "results.json")
 ARTIFACT_DIR = os.path.join(REPO_ROOT, "artifacts")
+
+# Leave-one-out switch (set by --exclude-self). Default False reproduces the
+# ledger: training queries and teacher queries may match themselves in the bank.
+EXCLUDE_SELF = False
+
+
+def train_softknn(x_fit, y_fit, x_val, y_val, cfg, **kwargs):
+    """train.train_softknn, with cfg["exclude_self"] set when --exclude-self."""
+    if EXCLUDE_SELF:
+        cfg = dict(cfg, exclude_self=True)
+    return _train_softknn(x_fit, y_fit, x_val, y_val, cfg, **kwargs)
+
+
+def _knn_proba_on_fit_set(clf, x, y, n_classes=10):
+    """predict_proba of a fitted KNeighborsClassifier queried on its OWN fit
+    set. Without --exclude-self this is clf.predict_proba(x) (original
+    behaviour; with weights="distance" the zero self-distance makes it exactly
+    one-hot ground truth). With --exclude-self each point's own index is
+    dropped from its neighbour list (leave-one-out)."""
+    if not EXCLUDE_SELF:
+        return clf.predict_proba(x)
+    k = clf.n_neighbors
+    dist, ind = clf.kneighbors(x, n_neighbors=k + 1)
+    keep = ind != np.arange(len(x))[:, None]
+    keep[keep.all(1), -1] = False  # self not returned (duplicates): drop farthest
+    dist = dist[keep].reshape(len(x), k)
+    ind = ind[keep].reshape(len(x), k)
+    if clf.weights == "distance":
+        with np.errstate(divide="ignore"):
+            w = 1.0 / dist
+        zero = np.isinf(w)
+        rows = zero.any(1)
+        w[rows] = zero[rows].astype(float)
+    else:
+        w = np.ones_like(dist)
+    proba = np.zeros((len(x), n_classes))
+    np.add.at(proba, (np.repeat(np.arange(len(x)), k), np.asarray(y)[ind].ravel()),
+              w.ravel())
+    return proba / proba.sum(1, keepdims=True)
 
 SCALES = {
     "tiny": dict(train=4000, val=1500, test=2000, optuna_trials=3, epochs=2,
@@ -230,7 +273,8 @@ def e5_latency(ctx):
             ax.bar([j + i * width for j in range(len(pts))],
                    [p[1] for p in pts], width, label=algo)
     ax.set_xticks([j + width for j in range(len(variants))], [v["name"] for v in variants])
-    ax.set_ylabel("query latency, 1k val (s, median of 3)")
+    ax.set_ylabel(f"query latency, {len(ctx.xv)} val queries "
+                  "(s; brute: median of 3, trees: 1 run)")
     ax.set_title("KNN query latency: algorithm x feature space")
     ax.legend(); ax.grid(alpha=0.3, axis="y")
     evaluate.save_fig(fig, "05_latency.png")
@@ -408,9 +452,9 @@ def _best_softknn_tag(ctx):
 def e10_tta(ctx):
     """TTA on the best Soft-KNN artifact from the ledger (no retraining)."""
     tag = _best_softknn_tag(ctx)
-    state = torch.load(os.path.join(ARTIFACT_DIR, tag), map_location=ctx.device)
-    model = SoftKNN(embed_dim=state["proj.lin.weight"].shape[0]).to(ctx.device)
-    model.load_state_dict(state)
+    # load_softknn handles linear, MLP and conv artefacts (building a linear
+    # SoftKNN from state["proj.lin.weight"] crashed on non-linear ones).
+    model = load_softknn(os.path.join(ARTIFACT_DIR, tag), ctx.device)
     val_probs_plain, test_probs_plain = _softknn_eval(ctx, model, use_tta=False)
     val_probs_tta, test_probs_tta = _softknn_eval(ctx, model, use_tta=True)
     val_plain = float((val_probs_plain.argmax(1) == ctx.yv).mean())
@@ -465,9 +509,7 @@ def e12_inference_grid(ctx):
     tau varied at inference only -> accuracy + prediction entropy response.
     """
     tag = _best_softknn_tag(ctx)
-    state = torch.load(os.path.join(ARTIFACT_DIR, tag), map_location=ctx.device)
-    model = SoftKNN(embed_dim=state["proj.lin.weight"].shape[0]).to(ctx.device)
-    model.load_state_dict(state)
+    model = load_softknn(os.path.join(ARTIFACT_DIR, tag), ctx.device)
     with torch.no_grad():
         bank_z = model.embed(torch.as_tensor(ctx.xa, dtype=torch.float32,
                                              device=ctx.device))
@@ -558,12 +600,14 @@ def e14_bank_aug(ctx):
 
 
 def e15_seed_ensemble(ctx):
-    """3-seed ensemble of the best Soft-KNN config + final late fusion."""
-    use_aug = getattr(ctx, "_e7_val", 0) >= getattr(ctx, "_e6_val", 0)
-    tag = ("softknn_shift.pt" if os.path.exists(os.path.join(ARTIFACT_DIR, "softknn_shift.pt"))
-           and getattr(ctx, "_e7_val", 0) > getattr(ctx, "_e6_val", 0)
-           else "softknn_base.pt")
-    state = torch.load(os.path.join(ARTIFACT_DIR, tag), map_location=ctx.device)
+    """3-seed ensemble of the linear Soft-KNN + final late fusion.
+
+    Every seed is retrained from scratch with the E6 base config (PCA warm
+    start, no augmentation); no existing artefact is loaded. (Older versions
+    computed unused variables and logged "source": "softknn_shift.pt", which
+    is what the existing E15 ledger entry shows; the models were in fact the
+    base config.)
+    """
     base_cfg = {"embed_dim": ctx.cfg["embed_dim"], "k": 7, "tau": 0.5, "lr": 1e-3,
                 "optimizer": "adam", "epochs": ctx.cfg["epochs"], "batch_size": 256,
                 "patience": 4, "augment": None, "augmented_bank_copies": 0,
@@ -612,7 +656,9 @@ def e15_seed_ensemble(ctx):
     print(f"[E15] fusion w={best_w:.1f} val={best_val:.4f} "
           f"test={test_metrics['accuracy']:.4f}")
     evaluate.plot_confusion_matrix(ctx.yte, fused.argmax(1))
-    return {"name": "seed_ensemble_fusion", "source": tag, "seeds": [42, 7, 123],
+    return {"name": "seed_ensemble_fusion",
+            "source": "retrained: E6 base config (no augmentation)",
+            "seeds": [42, 7, 123],
             "ens_val_acc": ens_val_acc, "ens_test_acc": ens_test_acc,
             "fusion_weight_softknn": best_w, "val_acc": best_val,
             "test_acc": test_metrics["accuracy"],
@@ -1002,8 +1048,10 @@ def e23_distill(ctx):
             m = load_softknn(path, ctx.device)
             with torch.no_grad():
                 bz = embed_chunked(m, xa_t)
+            # Teacher queried on its own bank: self-match unless EXCLUDE_SELF.
             p = predict_probs(m, bz, ya_t, ctx.xa, k=9, tau=1.0,
-                              device=ctx.device).numpy()
+                              device=ctx.device,
+                              exclude_self=EXCLUDE_SELF).numpy()
             teacher = p if teacher is None else teacher + p
             n_te += 1
     if not n_te:
@@ -1104,8 +1152,10 @@ def e26_distill_gen2(ctx):
         m = load_softknn(path, ctx.device)
         with torch.no_grad():
             bz = embed_chunked(m, xa_t)
+        # Queried on its own bank: self-match unless EXCLUDE_SELF.
         probs_by_name[name] = predict_probs(m, bz, ya_t, ctx.xa, k=k, tau=tau,
-                                            device=ctx.device).numpy()
+                                            device=ctx.device,
+                                            exclude_self=EXCLUDE_SELF).numpy()
 
     for seed in (42, 7, 123):
         _bank_probs_model(os.path.join(ARTIFACT_DIR, f"softknn_conv_s{seed}.pt"),
@@ -1127,7 +1177,7 @@ def e26_distill_gen2(ctx):
                                               "weights": "distance"})
     clf = classical.make_knn(**params)
     clf.fit(za, ctx.ya)
-    probs_by_name["knn_classical"] = clf.predict_proba(za)
+    probs_by_name["knn_classical"] = _knn_proba_on_fit_set(clf, za, ctx.ya)
 
     teacher, used = None, []
     for name, w in weights.items():
@@ -1250,6 +1300,8 @@ def run_stage(stage_id, ctx, ledger, force=False):
         return
     t0 = time.perf_counter()
     entry = STAGES[stage_id](ctx)
+    if EXCLUDE_SELF:
+        entry["exclude_self"] = True
     entry.update({"id": stage_id, "scale": ctx.scale,
                   "wall_s": round(time.perf_counter() - t0, 1),
                   "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")})
@@ -1264,7 +1316,13 @@ def main():
     ap.add_argument("--stages", default="")
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--exclude-self", action="store_true",
+                    help="leave-one-out: mask each training image's own bank "
+                         "entry in training and in teacher targets (off by "
+                         "default; the logged ledger was produced without it)")
     args = ap.parse_args()
+    global EXCLUDE_SELF
+    EXCLUDE_SELF = args.exclude_self
     ctx = Ctx(args.scale)
     ledger = load_ledger()
     ctx.ledger = ledger
@@ -1280,7 +1338,7 @@ def main():
         extra = {k: v for k, v in e.items()
                  if k not in ("stage", "val_acc", "test_acc", "history",
                               "epochs", "per_epoch")}
-        print(f"  [{e.get('stage', '?')}] val={val*100:.2f}%  test={test*100:.2f}%"
+        print(f"  [{e.get('id', '?')}] val={val*100:.2f}%  test={test*100:.2f}%"
               f"  {extra if extra else ''}")
     print("=" * 62)
 

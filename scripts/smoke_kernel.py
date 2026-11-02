@@ -13,6 +13,11 @@ Checks (no GPU required, < 30 s):
   5. The distillation teacher glob matches seed artefacts only
      (must NOT match softknn_conv_shift.pt).
   6. The dual-GPU queue logic: distribution, completion, failure propagation.
+
+Checks 2 and 5 need files that are not in the repository: the generated
+Kaggle kernel script (pass its path in the KAGGLE_KERNEL_SCRIPT environment
+variable) and trained seed artefacts under artifacts/ (gitignored). When those
+are absent the checks are reported as SKIP, not FAIL.
 """
 import base64
 import glob
@@ -31,16 +36,24 @@ ROOT = os.path.dirname(HERE)
 BUNDLE = ["src/__init__.py", "src/data.py", "src/augment.py",
           "src/softknn.py", "src/train.py",
           "scripts/train_conv_seed.py", "scripts/train_distill.py"]
-KERNEL_SCRIPT = "/tmp/opencode/kg-kernel/script.py"
+KERNEL_SCRIPT = os.environ.get("KAGGLE_KERNEL_SCRIPT", "")
 ARTIFACT_DIR = os.path.join(ROOT, "artifacts")
 
 failures = []
+skipped = []
+
+
+class Skip(Exception):
+    """Raised by a check whose required external input is missing."""
 
 
 def check(name, fn):
     try:
         fn()
         print(f"  [PASS] {name}")
+    except Skip as why:
+        skipped.append(name)
+        print(f"  [SKIP] {name}: {why}")
     except Exception as exc:  # noqa: BLE001 - smoke gate reports everything
         failures.append(name)
         print(f"  [FAIL] {name}: {exc}")
@@ -52,6 +65,9 @@ def t_bundle_compiles():
 
 
 def t_kernel_script_roundtrip():
+    if not KERNEL_SCRIPT or not os.path.isfile(KERNEL_SCRIPT):
+        raise Skip("no kernel script; set KAGGLE_KERNEL_SCRIPT=/path/to/script.py "
+                   "(generated outside this repo) to run this check")
     py_compile.compile(KERNEL_SCRIPT, doraise=True)
     src = open(KERNEL_SCRIPT).read()
     m = re.search(r"parts = \[(.*?)\]", src, flags=re.S)
@@ -103,9 +119,13 @@ def t_arg_parsing():
 
 def t_teacher_glob_real():
     import glob as _g
+    if not os.path.isdir(ARTIFACT_DIR):
+        raise Skip(f"{ARTIFACT_DIR} not found (gitignored; created by "
+                   "scripts/train_conv_seed.py)")
     hits = sorted(os.path.basename(p) for p in
                   _g.glob(os.path.join(ARTIFACT_DIR, "softknn_conv_s[0-9]*.pt")))
-    assert hits, "no seed artefacts present locally to validate the glob"
+    if not hits:
+        raise Skip("no softknn_conv_s*.pt seed artefacts in artifacts/")
     assert not any("shift" in h for h in hits), "glob matched conv_shift!"
 
 
@@ -148,4 +168,7 @@ check("dual-GPU queue logic", t_queue_logic)
 if failures:
     print(f"SMOKE GATE FAILED: {failures} — DO NOT PUSH")
     sys.exit(1)
-print("SMOKE GATE PASSED — safe to push")
+if skipped:
+    print(f"SMOKE GATE PASSED with {len(skipped)} skipped check(s): {skipped}")
+else:
+    print("SMOKE GATE PASSED — safe to push")
