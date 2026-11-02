@@ -14,7 +14,7 @@ Protocol is identical to src/experiments.py at scale "full": src.data.load_split
 src.classical.make_knn / fit_pca (PCA svd_solver="full").
 
 Usage (from repo root):
-    python scripts/rerun_classical.py --data-dir /path/to/idx_gz_dir
+    python src/rerun_classical.py --data-dir /path/to/idx_gz_dir
 """
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ def main():
           f"range=[{xa.min():.1f},{xa.max():.1f}]", flush=True)
 
     out = {
-        "description": "Logged re-run of classical KNN numbers (scripts/rerun_classical.py)",
+        "description": "Logged re-run of classical KNN numbers (src/rerun_classical.py)",
         "started_utc": started.isoformat(timespec="seconds"),
         "environment": {
             "python": platform.python_version(), "numpy": np.__version__,

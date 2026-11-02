@@ -8,7 +8,7 @@
 **Authors:** Akshar Nath Gorain et al.  
 **Affiliation:** Department of Computer Science & Machine Learning Research Group  
 **Target Venue:** Machine Learning & Pattern Recognition Coursework  
-**Codebase:** `src/` (pipeline), `scripts/` (seed and distillation trainers), `results/` (logs); [`fashion_knn_colab.ipynb`](fashion_knn_colab.ipynb) is an interactive Colab notebook (see §7)  
+**Codebase:** `src/` (pipeline), `src/` (seed and distillation trainers), `results/` (logs); [`fashion_knn_colab.ipynb`](fashion_knn_colab.ipynb) is an interactive Colab notebook (see §7)  
 **Execution Environment:** Python ≥ 3.10, PyTorch ≥ 2.3. `src/experiments.py` ran on the authors' local machine; the conv-seed and distillation runs in `results/kaggle_*.json` ran on Kaggle GPUs  
 
 ---
@@ -190,7 +190,7 @@ E9 trains the linear Soft-KNN (PCA-64 warm start, 128-D embedding, training $\ta
    * Adam (no weight decay), no learning-rate schedule, batch size 256.
    * Training $\tau = 0.5$, $k = 7$.
    * Early stopping on validation accuracy (patience 4 for linear, 6 for MLP, 8–10 for conv).
-   * Conv runs in `scripts/` use AMP on CUDA.
+   * Conv runs in `src/` use AMP on CUDA.
 5. **Augmentation** (pure PyTorch, `src/augment.py`):
    * Horizontal flip, ±2 px shift and random erasing; there is no random crop.
    * Applied to training queries in E7 (all three) and E13/E20 (shift only), and to extra bank copies in E14.
@@ -235,7 +235,7 @@ The ledger has 28 entries:
 
 E10's validation value is the TTA validation accuracy (`val_tta`); its plain (no-TTA) values are 88.22 / 87.10.
 
-**Kaggle runs.** Some runs were trained on Kaggle GPUs with `scripts/` and logged separately:
+**Kaggle runs.** Some runs were trained on Kaggle GPUs with `src/` and logged separately:
 * `results/kaggle_conv_seeds.json`: seeds 42/7/123, test 87.44 / 87.25 / 87.54 %.
 * `results/kaggle_distill.json`: the 89.03 % student reused by E23–E25.
 * `results/kaggle_distill_5teacher.json`: a 5-teacher student, 89.01 %, not used in any fusion.
@@ -305,14 +305,14 @@ Soft-KNN inference latency was **not measured**. Soft-KNN inference is itself a 
 git clone https://github.com/workforakng/fashion-mnist-knn-optimization.git
 cd fashion-mnist-knn-optimization
 bash setup_env.sh                 # or: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python scripts/smoke.py # pre-flight check (downloads the data, ~1 min on CPU)
+.venv/bin/python src/smoke.py # pre-flight check (downloads the data, ~1 min on CPU)
 
 # Classical + Soft-KNN stages (appends to results/results.json; stages already
 # in the ledger are skipped unless --force)
 .venv/bin/python -m src.experiments --scale full --stages E1,E2,E3,E4,E5,E6
 # Conv seeds and distillation (the logged runs of these used Kaggle GPUs)
-.venv/bin/python scripts/train_conv_seed.py --seed 42 --epochs 35
-.venv/bin/python scripts/train_distill.py
+.venv/bin/python src/train_conv_seed.py --seed 42 --epochs 35
+.venv/bin/python src/train_distill.py
 ```
 Python ≥ 3.10 and PyTorch ≥ 2.3 are required. A GPU is strongly recommended from E6 onward.
 

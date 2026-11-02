@@ -50,3 +50,4 @@ done
 
 # Keep matching Akshar submission copy in docs
 cp "pdf/241001001213_FashionKNN.pdf" "docs/241001001213_FashionKNN.pdf"
+cp "pdf/241001001213_FashionKNN.pdf" "241001001213_FashionKNN.pdf"

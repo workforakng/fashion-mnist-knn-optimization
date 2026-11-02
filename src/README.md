@@ -52,7 +52,7 @@ There are **no learnable class prototypes**: the "anchors" are the detached embe
 * Caveats when re-running:
   * A stage is skipped if **any** ledger entry has its ID, whatever its `scale`.
   * Upstream choices (best PCA dim, Optuna parameters, best k/τ) are kept only in memory, so a new session falls back to defaults.
-  * E21 and E23 silently reuse artefacts from `artifacts/` if present (the logged entries reused models trained with `scripts/` on Kaggle).
+  * E21 and E23 silently reuse artefacts from `artifacts/` if present (the logged entries reused models trained with `src/` on Kaggle).
   * The fusion stages (E22, E24, E25, E27) include whatever artefacts exist in `artifacts/`, so their sources can change between runs.
   * `artifacts/` is gitignored, so stages E10 onward cannot be re-run from a fresh clone without retraining.
 
@@ -64,6 +64,6 @@ During Soft-KNN training the memory bank is built from the same training images 
 
 * `train_acc` / `train_loss` in every training history (and the train curve in `figures/11_softknn_curves.png`) are inflated by roughly 8–10 points.
 * The loss partly rewards "stay close to your own bank entry"; validation and test numbers are only slightly affected (about ±0.5 pt), because validation and test images are never in the bank.
-* Distillation teachers (E23, E26, `scripts/train_distill.py`) are computed on training images that are in their own bank, so the soft targets are biased toward the hard labels. The E26 classical-KNN teacher component (`predict_proba` with distance weights on its own fit set) is exactly one-hot.
+* Distillation teachers (E23, E26, `src/train_distill.py`) are computed on training images that are in their own bank, so the soft targets are biased toward the hard labels. The E26 classical-KNN teacher component (`predict_proba` with distance weights on its own fit set) is exactly one-hot.
 
-**Opt-in fix.** `cfg["exclude_self"] = True` in `train_softknn`, `predict_probs(..., exclude_self=True)`, `python -m src.experiments --exclude-self`, and `--exclude-self` in `scripts/train_conv_seed.py` / `scripts/train_distill.py` mask each query's own bank indices (leave-one-out, as in NCA). This also applies a leave-one-out KNN for the E26 classical teacher. **The default is off**, so the code reproduces the logged results in `results/results.json`, which were all produced with self-match.
+**Opt-in fix.** `cfg["exclude_self"] = True` in `train_softknn`, `predict_probs(..., exclude_self=True)`, `python -m src.experiments --exclude-self`, and `--exclude-self` in `src/train_conv_seed.py` / `src/train_distill.py` mask each query's own bank indices (leave-one-out, as in NCA). This also applies a leave-one-out KNN for the E26 classical teacher. **The default is off**, so the code reproduces the logged results in `results/results.json`, which were all produced with self-match.

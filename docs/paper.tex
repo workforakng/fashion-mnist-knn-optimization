@@ -373,8 +373,8 @@ E14 & Augmented memory bank cached copies (without query perturbation) & 87.13 &
 \textbf{Reproducibility.} The open repository contains complete reproduction scripts and ledgers:
 \begin{itemize}[leftmargin=1.4em]
 \item \texttt{python -m src.experiments --scale full --stages E1,E2,...}: runs the experimental pipeline and logs results into \file{results/results.json}.
-\item \texttt{python scripts/train\_conv\_seed.py} and \texttt{python scripts/train\_distill.py}: trains the multi-seed convolutional backbones and the student network.
-\item \texttt{python scripts/rerun\_classical.py}: reproduces the classical KNN sweeps and latency benchmarks in \file{results/classical_reruns.json}.
+\item \texttt{python src/train\_conv\_seed.py} and \texttt{python src/train\_distill.py}: trains the multi-seed convolutional backbones and the student network.
+\item \texttt{python src/rerun\_classical.py}: reproduces the classical KNN sweeps and latency benchmarks in \file{results/classical_reruns.json}.
 \item \texttt{bash docs/build\_papers.sh}: automatically compiles all four per-member student PDF reports.
 \end{itemize}
 

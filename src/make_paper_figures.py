@@ -1,7 +1,7 @@
 """Print-ready vector figures for the paper, driven only by logged results.
 
 Usage:
-    python scripts/make_paper_figures.py [--data-dir DIR] [--recompute-pca]
+    python src/make_paper_figures.py [--data-dir DIR] [--recompute-pca]
 
 Reads results/results.json (and results/conv_seeds.json) and writes PDFs to
 figures/paper/. Existing figures/*.png are left untouched.

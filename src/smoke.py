@@ -1,7 +1,7 @@
 """Tiny-scale smoke test of the whole harness.
 
 Run after env setup:
-    .venv/bin/python scripts/smoke.py
+    .venv/bin/python src/smoke.py
 """
 import os
 import sys

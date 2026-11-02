@@ -1,7 +1,7 @@
 """Pre-push smoke test for the Kaggle kernel bundle.
 
 Run BEFORE every `kaggle kernels push`:
-    .venv/bin/python scripts/smoke_kernel.py
+    .venv/bin/python src/smoke_kernel.py
 
 Checks (no GPU required, < 30 s):
   1. Every bundled source file compiles.
@@ -35,7 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BUNDLE = ["src/__init__.py", "src/data.py", "src/augment.py",
           "src/softknn.py", "src/train.py",
-          "scripts/train_conv_seed.py", "scripts/train_distill.py"]
+          "src/train_conv_seed.py", "src/train_distill.py"]
 KERNEL_SCRIPT = os.environ.get("KAGGLE_KERNEL_SCRIPT", "")
 ARTIFACT_DIR = os.path.join(ROOT, "artifacts")
 
@@ -107,9 +107,9 @@ def t_data_mapping():
 
 def t_arg_parsing():
     for script, argv in (
-        ("scripts/train_conv_seed.py",
+        ("src/train_conv_seed.py",
          ["--seed", "42", "--epochs", "35"]),
-        ("scripts/train_distill.py", []),
+        ("src/train_distill.py", []),
     ):
         r = subprocess.run([sys.executable, os.path.join(ROOT, script),
                             "--help"] + ([] if not argv else []),
@@ -121,7 +121,7 @@ def t_teacher_glob_real():
     import glob as _g
     if not os.path.isdir(ARTIFACT_DIR):
         raise Skip(f"{ARTIFACT_DIR} not found (gitignored; created by "
-                   "scripts/train_conv_seed.py)")
+                   "src/train_conv_seed.py)")
     hits = sorted(os.path.basename(p) for p in
                   _g.glob(os.path.join(ARTIFACT_DIR, "softknn_conv_s[0-9]*.pt")))
     if not hits:
