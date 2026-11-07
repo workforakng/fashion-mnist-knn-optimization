@@ -18,6 +18,28 @@ Standard K-Nearest Neighbors fails on image data due to the curse of dimensional
 
 ---
 
+## Dataset Class Examples
+
+### Overall Dataset Overview (All 10 Classes)
+![All Classes Overview](images/dataset_overview_all_classes.png)
+
+### Per-Class Exemplars
+
+| Class Index & Name | Sample 1 | Sample 2 | Sample 3 |
+| :--- | :---: | :---: | :---: |
+| **0. T-shirt/top** | ![T-shirt/top 1](images/class_0_T-shirt_top_sample_1.png) | ![T-shirt/top 2](images/class_0_T-shirt_top_sample_2.png) | ![T-shirt/top 3](images/class_0_T-shirt_top_sample_3.png) |
+| **1. Trouser** | ![Trouser 1](images/class_1_Trouser_sample_1.png) | ![Trouser 2](images/class_1_Trouser_sample_2.png) | ![Trouser 3](images/class_1_Trouser_sample_3.png) |
+| **2. Pullover** | ![Pullover 1](images/class_2_Pullover_sample_1.png) | ![Pullover 2](images/class_2_Pullover_sample_2.png) | ![Pullover 3](images/class_2_Pullover_sample_3.png) |
+| **3. Dress** | ![Dress 1](images/class_3_Dress_sample_1.png) | ![Dress 2](images/class_3_Dress_sample_2.png) | ![Dress 3](images/class_3_Dress_sample_3.png) |
+| **4. Coat** | ![Coat 1](images/class_4_Coat_sample_1.png) | ![Coat 2](images/class_4_Coat_sample_2.png) | ![Coat 3](images/class_4_Coat_sample_3.png) |
+| **5. Sandal** | ![Sandal 1](images/class_5_Sandal_sample_1.png) | ![Sandal 2](images/class_5_Sandal_sample_2.png) | ![Sandal 3](images/class_5_Sandal_sample_3.png) |
+| **6. Shirt** | ![Shirt 1](images/class_6_Shirt_sample_1.png) | ![Shirt 2](images/class_6_Shirt_sample_2.png) | ![Shirt 3](images/class_6_Shirt_sample_3.png) |
+| **7. Sneaker** | ![Sneaker 1](images/class_7_Sneaker_sample_1.png) | ![Sneaker 2](images/class_7_Sneaker_sample_2.png) | ![Sneaker 3](images/class_7_Sneaker_sample_3.png) |
+| **8. Bag** | ![Bag 1](images/class_8_Bag_sample_1.png) | ![Bag 2](images/class_8_Bag_sample_2.png) | ![Bag 3](images/class_8_Bag_sample_3.png) |
+| **9. Ankle boot** | ![Ankle boot 1](images/class_9_Ankle_boot_sample_1.png) | ![Ankle boot 2](images/class_9_Ankle_boot_sample_2.png) | ![Ankle boot 3](images/class_9_Ankle_boot_sample_3.png) |
+
+---
+
 ## Key Novelty Points in Detail
 
 ### 1. Differentiable Memory-Bank Metric Learning (Soft-KNN)
