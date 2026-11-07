@@ -90,6 +90,15 @@ To resolve these bottlenecks while strictly preserving the instance-based metric
 * **Distillation:** soft targets from a 3-seed conv ensemble train a single conv student (Hinton et al. [6]).
 * **Progression:** 28 ledger entries (26 distinct stages, E0–E26 without E18) move test accuracy from **85.24%** (raw baseline) to **89.51%** (E25 fusion; 7 candidate sources, 3 with non-zero weight).
 
+### 1.3 Key Project Novelty & Benchmark Context
+A dedicated overview and visual class examples are detailed in [`novelty_and_examples/`](novelty_and_examples/):
+- **Differentiable Memory-Bank Metric Learning:** Replaces heuristic voting or static class centroids by backpropagating through a dynamic 54,000-sample memory bank.
+- **Topological Invariance:** Integrates 2D convolutional embeddings to counter spatial dislocation and distance concentration.
+- **Memory-Bank Augmentation:** Extends the exemplar reference bank directly to improve neighbor sampling density without increasing network parameters.
+- **Ensemble Distillation to Student:** Compresses multi-seed metric representations into a single fast student network.
+- **Heterogeneous Decision Fusion:** Unites classical PCA-KNN, deep metric models, and multi-view TTA to achieve **89.51% test accuracy**.
+- **Performance Context & Scope:** While standard modern deep CNNs and vision transformers achieve higher scores on Fashion-MNIST (often >93–94%), **89.51%** represents the highest benchmark achievable specifically under the instance-based, nearest-neighbor non-parametric constraint without switching to standard dense parametric linear heads.
+
 ---
 
 ## 2. Theoretical Framework and Methodology
